@@ -136,11 +136,6 @@ object Build {
 
   val fetchScalaJSSource = taskKey[File]("Fetch the sources of Scala.js")
 
-  // Scala3doc specific tasks
-  val buildDokkaApi = taskKey[File]("Compile dokka wrapper and put jar in lib")
-  val generateSelfDocumentation = taskKey[Unit]("Generate example documentation")
-  val generateDottyLibDocumentation = taskKey[Unit]("Generate documentation for dotty lib")
-
   lazy val SourceDeps = config("sourcedeps")
 
   // Settings shared by the build (scoped in ThisBuild). Used in build.sbt
@@ -1169,6 +1164,7 @@ object Build {
   lazy val `scala3-bench-run` = project.in(file("bench-run")).asDottyBench(Bootstrapped)
 
   lazy val `scala3doc` = project.in(file("scala3doc")).asScala3doc
+  lazy val `scala3doc-test` = project.in(file("scala3doc-test")).asScala3docTest
   lazy val `scala3doc-example-project` = project.in(file("scala3doc-example-project")).asDocExampleProject
 
   // sbt plugin to use Dotty in your own build, see
@@ -1458,83 +1454,26 @@ object Build {
       settings(commonBenchmarkSettings).
       enablePlugins(JmhPlugin)
 
-    def asScala3doc: Project = {
-      val dokkaVersion = "1.4.10.2"
-      val kotlinxVersion = "0.7.2" // upgrade when upgrading dokka
-      val flexmarkVersion = "0.42.12"
-      val jacksonVersion = "2.9.8"
-      val scalaTagsVersion = "0.9.1"
-      val dokkaSiteVersion = "0.1.9"
+    def commonScala3DocSettings = commonBootstrappedSettings ++ Seq(
+      scalaVersion := dottyVersion,
+      resolvers += Resolver.jcenterRepo,
+      resolvers += Resolver.bintrayRepo("kotlin", "kotlin-dev"),
+      resolvers += Resolver.bintrayRepo("virtuslab", "dokka"),
+      // hack, we cannot build documentation so we need this to publish locally
+      publishArtifact in (Compile, packageDoc) := false
+    )
 
+    def asScala3doc: Project = 
       project.
-        settings(commonBootstrappedSettings).
+        settings(commonScala3DocSettings).
         dependsOn(`scala3-compiler-bootstrapped`).
-        dependsOn(`scala3-tasty-inspector`).
-        settings(
-          Compile/scalaSource := baseDirectory.value / "src/main/scala",
-          Test/scalaSource := baseDirectory.value / "src/test/scala",
-          Compile/resourceDirectory := baseDirectory.value / "src/main/resources",
-          Test/resourceDirectory := baseDirectory.value / "src/test/resources",
+        dependsOn(`scala3-tasty-inspector`)
 
-          scalaVersion := dottyVersion,
-          resolvers ++= Seq(
-            Resolver.jcenterRepo,
-            Resolver.bintrayRepo("kotlin", "kotlin-dev"),
-            Resolver.bintrayRepo("virtuslab", "dokka"),
-          ),
-          libraryDependencies ++= Seq(
-            "org.jetbrains.dokka" % "dokka-test-api" % dokkaVersion % "test",
-
-            "org.scala-lang" %% "scala3-tasty-inspector" % dottyVersion,
-
-            "org.jetbrains.dokka" % "dokka-base" % dokkaVersion,
-            "org.jetbrains.dokka" % "dokka-core" % dokkaVersion,
-            "org.jetbrains.dokka" % "dokka-test-api" % dokkaVersion,
-            "org.jetbrains.kotlinx" % "kotlinx-html-jvm" % kotlinxVersion,
-            "com.virtuslab.dokka" % "dokka-site" % dokkaSiteVersion,
-
-            "org.scala-sbt" % "io_2.13" % "1.3.4",
-
-            "com.vladsch.flexmark" % "flexmark-all" % flexmarkVersion,
-            "com.lihaoyi" % "scalatags_2.13" % scalaTagsVersion,
-            "nl.big-o" % "liqp" % "0.6.7",
-            "args4j" % "args4j" % "2.33",
-          ),
-
-          run / fork := true,
-          Test / fork  := true,
-          Test / parallelExecution := false,
-          Compile / mainClass := Some("dotty.dokka.Main"),
-
-          Test / envVars := Map(
-            "scala3doc.classroot" -> (Compile/target/classDirectory).value.getAbsolutePath.toString,
-          ),
-
-          // hack, we cannot build documentation so we need this to publish locally
-          Compile / packageDoc / publishArtifact := false,
-
-          generateSelfDocumentation := Def.taskDyn {
-            val classdir = (Compile/target/classDirectory).value
-            (Compile/run).toTask(s" -o output/self -t ${classdir} -d documentation -n scala3doc -s src/main/scala=https://github.com/lampepfl/scala3doc/tree/master/src/main/scala#L")
-          }.value,
-
-          generateDottyLibDocumentation := Def.taskDyn {
-            val dottyLib = (Compile/fullClasspath).value.find{ a =>
-              val info = a.get(moduleID.key)
-              info.nonEmpty &&
-              info.get.organization == "ch.epfl.lamp" &&
-              info.get.name.startsWith("dotty-library")
-            }
-            if (dottyLib.isEmpty) Def.task {
-              streams.value.log.error("Dotty lib wasn't found")
-            } else Def.task {
-              (Compile/run).toTask(s" -o output/stdLib -t ${dottyLib.get.data} -d dotty-docs/docs -n dotty-lib -s library/src=https://github.com/lampepfl/dotty/tree/master/library/src#L").value
-            }
-          }.value,
-
-        )
-    }
-
+    def asScala3docTest: Project = 
+      project.
+        settings(commonScala3DocSettings).
+        dependsOn(`scala3doc`)
+    
     def asDocExampleProject: Project = project.
       settings(commonBootstrappedSettings0).
       dependsOn(`scala3-compiler-bootstrapped`).
