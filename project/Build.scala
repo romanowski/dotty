@@ -280,8 +280,6 @@ object Build {
 
   // Settings used when compiling dotty with a non-bootstrapped dotty
   lazy val commonBootstrappedSettings = commonBootstrappedSettings0 ++ Seq(
-    // sbt-dotty defines `scalaInstance in doc` so we need to override it manually
-    scalaInstance in doc := scalaInstance.value,
     disableDocSetting,
   )
   lazy val commonBootstrappedSettings0 = commonDottySettings ++ Seq(
@@ -340,6 +338,9 @@ object Build {
         allJars
       )
     },
+
+    // sbt-dotty defines `scalaInstance in doc` so we need to override it manually
+    scalaInstance in doc := scalaInstance.value,
   )
 
   lazy val commonBenchmarkSettings = Seq(
@@ -1461,8 +1462,6 @@ object Build {
       resolvers += Resolver.jcenterRepo,
       resolvers += Resolver.bintrayRepo("kotlin", "kotlin-dev"),
       resolvers += Resolver.bintrayRepo("virtuslab", "dokka"),
-      // hack, we cannot build documentation so we need this to publish locally
-      publishArtifact in (Compile, packageDoc) := false
     )
 
     def asScala3doc: Project = 
