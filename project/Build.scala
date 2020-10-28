@@ -339,6 +339,8 @@ object Build {
 
     // sbt-dotty defines `scalaInstance in doc` so we need to override it manually
     scalaInstance in doc := scalaInstance.value,
+
+    disableDocSetting,
   )
 
   lazy val commonBenchmarkSettings = Seq(
@@ -1166,7 +1168,7 @@ object Build {
 
   val testcasesOutputDir = taskKey[String]("Root directory where tests classses are generated")
   val testcasesSourceRoot = taskKey[String]("Root directory where tests sources are generated")
-  val generateSelfDocumentation = inputKey[Unit]("Generate example documentation")
+  val generateSelfDocumentation = taskKey[Unit]("Generate example documentation")
   val generateScala3Documentation = taskKey[Unit]("Generate documentation for dotty lib")
   val generateTestcasesDocumentation  = taskKey[Unit]("Generate documentation for testcases, usefull for debugging tests")
   lazy val `scala3doc` = project.in(file("scala3doc")).asScala3doc
@@ -1462,15 +1464,16 @@ object Build {
     def asScala3doc: Project = {
       def generateDocumentation(targets: String, name: String, outDir: String, params: String = "") = Def.taskDyn {
           val sourceMapping = "=https://github.com/lampepfl/dotty/tree/master#L"
-          run.in(Compile).toTask(s""" -o output/$outDir -t $targets -n "$name" -s $sourceMapping $params""")
+          run.in(Compile).toTask(s""" -d output/$outDir -t $targets -n "$name" -s $sourceMapping $params""")
       }
 
       project.settings(commonBootstrappedSettings).
         dependsOn(`scala3-compiler-bootstrapped`).
         dependsOn(`scala3-tasty-inspector`).
         settings(
+          // Needed to download dokka and its dependencies
           resolvers += Resolver.jcenterRepo,
-          resolvers += Resolver.bintrayRepo("kotlin", "kotlin-dev"),
+          // Needed to download dokka-site
           resolvers += Resolver.bintrayRepo("virtuslab", "dokka"),
           libraryDependencies ++= Seq(
             "org.scala-lang" %% "scala3-tasty-inspector" % scalaVersion.value,
@@ -1483,17 +1486,15 @@ object Build {
             "org.jetbrains.dokka" % "dokka-test-api" % "1.4.10.2" % "test",
             "com.novocode" % "junit-interface" % "0.11" % "test",
           ),
-          test.in(Test) := test.in(Test).dependsOn(compile.in(Compile).in(`scala3doc-testcases`)).value,
+          Test / test := (Test / test).dependsOn(compile.in(Compile).in(`scala3doc-testcases`)).value,
           testcasesOutputDir.in(Test) := classDirectory.in(Compile).in(`scala3doc-testcases`).value.getAbsolutePath.toString,
           testcasesSourceRoot.in(Test) := (baseDirectory.in(`scala3doc-testcases`).value / "src").getAbsolutePath.toString,
-          fork.in(run) := true,
           Compile / mainClass := Some("dotty.dokka.Main"),
           // There is a bug in dokka that prevents parallel tests withing the same jvm
           fork.in(test) := true,
-          Test / parallelExecution := false,
-          generateSelfDocumentation := Def.inputTaskDyn {
-            generateDocumentation(classDirectory.in(Compile).value.getAbsolutePath, "scala3doc", "self", "-d documentation")
-          }.evaluated,
+          generateSelfDocumentation := Def.taskDyn {
+            generateDocumentation(classDirectory.in(Compile).value.getAbsolutePath, "scala3doc", "self", "-p documentation")
+          }.value,
           generateScala3Documentation := Def.taskDyn {
             val dottyJars = Seq(
               // All projects below will be used to generated documentation for Scala 3
@@ -1505,8 +1506,8 @@ object Build {
             )
             val roots = dottyJars.map(_.toString).mkString(java.io.File.pathSeparator)
 
-            if (dottyJars.isEmpty) Def.task { streams.value.log.error("Dotty lib wasn't found") } 
-            else generateDocumentation(roots, "Scala 3", "stdLib", "-d dotty-docs/docs")
+            if (dottyJars.isEmpty) Def.task { streams.value.log.error("Dotty lib wasn't found") }
+            else generateDocumentation(roots, "Scala 3", "stdLib", "-p dotty-docs/docs")
           }.value,
           generateTestcasesDocumentation := Def.taskDyn {
             generateDocumentation(Build.testcasesOutputDir.in(Test).value, "Scala3doc testcases", "testcases")
