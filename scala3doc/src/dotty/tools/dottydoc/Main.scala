@@ -1,7 +1,7 @@
 package dotty.tools
 package dottydoc
 
-import dotty.dokka.{Args, RawArgs, DocConfiguration, DottyDokkaConfig}
+import dotty.dokka.{Args, Scala3Args, DocConfiguration, DottyDokkaConfig}
 
 import org.jetbrains.dokka._
 import org.jetbrains.dokka.utilities._
@@ -11,6 +11,7 @@ import dotc.core.Contexts._
 import dotc.reporting.Reporter
 import dotc.{ Compiler, Driver }
 import dotc.config._
+import CommandLineParser.tokenize
 
 import dotty.tools.dotc.config.Settings.Setting.value
 
@@ -51,8 +52,7 @@ object Main extends Driver {
     // note: all required args should be set with SBT settings,
     // to make it easier to set and override them
     val dokkaArgs = {
-      val dokkaRawArgs = new RawArgs
-      val requiredArgs = Seq(
+      val requiredArgs = List(
         "--tastyRoots", "", // hack, value is not used in SBT but required in CLI
         // we extract some settings from Dotty options since that's how SBT passes them
         "--name", ctx.settings.projectName.value,
@@ -60,18 +60,15 @@ object Main extends Driver {
         "--dest", ctx.settings.outputDir.value.toString,
       )
 
-      val allArgs = requiredArgs ++ dokkaStrArgs
+      val allArgs = requiredArgs ++ dokkaStrArgs.flatMap(tokenize(_))
       println(s"Running scala3doc with arguments: $allArgs")
-      val parser = org.kohsuke.args4j.CmdLineParser(dokkaRawArgs)
-      try {
-        parser.parseArgument(allArgs : _*)
-      } catch {
-        case ex: org.kohsuke.args4j.CmdLineException =>
-          // compiler errors are reported in SBT
-          dotc.report.error(s"Error when parsing Scala3doc options: ${ex.getMessage}")
-          throw ex
-      }
-      dokkaRawArgs.toArgs
+
+      def reportError(err: String) =
+        val msg = s"Error when parsing Scala3doc options: $err"
+        dotc.report.error(msg)
+        throw new RuntimeException(msg)
+
+      Scala3Args().extract(allArgs, reportError)
     }
 
     val config = DocConfiguration.Sbt(dokkaArgs, filesToCompile, ctx)
