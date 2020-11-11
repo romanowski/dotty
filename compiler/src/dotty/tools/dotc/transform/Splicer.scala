@@ -146,17 +146,11 @@ object Splicer {
         case Apply(Select(Apply(fn, quoted :: Nil), nme.apply), _) if fn.symbol == defn.InternalQuoted_exprQuote =>
           // OK
 
-        case TypeApply(fn, quoted :: Nil) if fn.symbol == defn.QuotedTypeModule_apply =>
+        case Apply(Select(TypeApply(fn, List(quoted)), nme.apply), _)if fn.symbol == defn.QuotedTypeModule_apply =>
           // OK
 
         case Literal(Constant(value)) =>
           // OK
-
-        case Call(fn, args)
-            if (fn.symbol.isConstructor && fn.symbol.owner.owner.is(Package)) ||
-               fn.symbol.is(Module) || fn.symbol.isStatic ||
-               (fn.qualifier.symbol.is(Module) && fn.qualifier.symbol.isStatic) =>
-          args.foreach(_.foreach(checkIfValidArgument))
 
         case NamedArg(_, arg) =>
           checkIfValidArgument(arg)
@@ -329,10 +323,10 @@ object Splicer {
     }
 
     private def interpretQuote(tree: Tree)(implicit env: Env): Object =
-      new scala.internal.quoted.Expr(Inlined(EmptyTree, Nil, PickledQuotes.healOwner(tree)).withSpan(tree.span), QuoteContextImpl.scopeId)
+      new scala.quoted.internal.Expr(Inlined(EmptyTree, Nil, QuoteUtils.changeOwnerOfTree(tree, ctx.owner)).withSpan(tree.span), QuoteContextImpl.scopeId)
 
     private def interpretTypeQuote(tree: Tree)(implicit env: Env): Object =
-      new scala.internal.quoted.Type(PickledQuotes.healOwner(tree), QuoteContextImpl.scopeId)
+      new scala.quoted.internal.Type(QuoteUtils.changeOwnerOfTree(tree, ctx.owner), QuoteContextImpl.scopeId)
 
     private def interpretLiteral(value: Any)(implicit env: Env): Object =
       value.asInstanceOf[Object]

@@ -10,9 +10,9 @@ def testExpr(using QuoteContext): Expr[Unit] = {
   import qctx.reflect._
 
   '{
-    println(${Expr('[Object].unseal.tpe.baseClasses.toString)})
-    println(${Expr('[A].unseal.tpe.baseClasses.toString)})
-    println(${Expr('[B].unseal.tpe.baseClasses.toString)})
-    println(${Expr('[C].unseal.tpe.baseClasses.toString)})
+    println(${Expr(TypeRepr.of[Object].baseClasses.toString)})
+    println(${Expr(TypeRepr.of[A].baseClasses.toString)})
+    println(${Expr(TypeRepr.of[B].baseClasses.toString)})
+    println(${Expr(TypeRepr.of[C].baseClasses.toString)})
   }
 }

@@ -150,7 +150,14 @@ object TypeOps:
         tp.derivedAlias(simplify(tp.alias, theMap))
       case AndType(l, r) if !ctx.mode.is(Mode.Type) =>
         simplify(l, theMap) & simplify(r, theMap)
-      case OrType(l, r) if !ctx.mode.is(Mode.Type) =>
+      case tp as OrType(l, r)
+      if !ctx.mode.is(Mode.Type)
+         && (tp.isSoft || defn.isBottomType(l) || defn.isBottomType(r)) =>
+        // Normalize A | Null and Null | A to A even if the union is hard (i.e.
+        // explicitly declared), but not if -Yexplicit-nulls is set. The reason is
+        // that in this case the normal asSeenFrom machinery is not prepared to deal
+        // with Nulls (which have no base classes). Under -Yexplicit-nulls, we take
+        // corrective steps, so no widening is wanted.
         simplify(l, theMap) | simplify(r, theMap)
       case AnnotatedType(parent, annot)
       if !ctx.mode.is(Mode.Type) && annot.symbol == defn.UncheckedVarianceAnnot =>
@@ -363,7 +370,7 @@ object TypeOps:
           }
       if needsRefinement then
         RefinedType(parent, decl.name, decl.info)
-          .reporting(i"add ref $parent $decl --> " + result, typr)
+          .showing(i"add ref $parent $decl --> " + result, typr)
       else parent
     }
 
@@ -633,8 +640,6 @@ object TypeOps:
    *  returned. Otherwise, `NoType` is returned.
    */
   def refineUsingParent(parent: Type, child: Symbol)(using Context): Type = {
-    if (child.isTerm && child.is(Case, butNot = Module)) return child.termRef // enum vals always match
-
     // <local child> is a place holder from Scalac, it is hopeless to instantiate it.
     //
     // Quote from scalac (from nsc/symtab/classfile/Pickler.scala):

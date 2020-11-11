@@ -27,17 +27,17 @@ object Index {
   def succImpl[K, H, T](implicit qctx: QuoteContext, k: Type[K], h: Type[H], t: Type[T]): Expr[Index[K, (H, T)]] = {
     import qctx.reflect._
 
-    def name(tp: Type): String = tp match {
+    def name(tp: TypeRepr): String = tp match {
       case ConstantType(Constant.String(str)) => str
     }
 
-    def names(tp: Type): List[String] = tp match {
+    def names(tp: TypeRepr): List[String] = tp match {
       case AppliedType(_, x1 :: x2 :: Nil) => name(x1) :: names(x2)
       case _ => Nil
     }
 
-    val key = name(k.unseal.tpe)
-    val keys = name(h.unseal.tpe) :: names(t.unseal.tpe)
+    val key = name(TypeRepr.of[K])
+    val keys = name(TypeRepr.of[H]) :: names(TypeRepr.of[T])
 
     val index = keys.indexOf(key)
 

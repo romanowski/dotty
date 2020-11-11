@@ -1,14 +1,21 @@
 import scala.quoted._
 
-import scala.quoted.unsafe._
-
 object Macros {
 
-  inline def liftString(inline a: DSL): String = ${impl(StringNum, 'a)}
+  inline def liftString(inline a: DSL): String = ${implStringNum('a)}
 
-  inline def liftCompute(inline a: DSL): Int = ${impl(ComputeNum, 'a)}
+  private def implStringNum(a: Expr[DSL])(using qctx: QuoteContext): Expr[String] =
+    impl(StringNum, a)
 
-  inline def liftAST(inline a: DSL): ASTNum = ${impl(ASTNum, 'a)}
+  inline def liftCompute(inline a: DSL): Int = ${implComputeNum('a)}
+
+  private def implComputeNum(a: Expr[DSL])(using qctx: QuoteContext): Expr[Int] =
+    impl(ComputeNum, a)
+
+  inline def liftAST(inline a: DSL): ASTNum = ${implASTNum('a)}
+
+  private def implASTNum(a: Expr[DSL])(using qctx: QuoteContext): Expr[ASTNum] =
+    impl(ASTNum, a)
 
   private def impl[T: Type](sym: Symantics[T], a: Expr[DSL])(using qctx: QuoteContext): Expr[T] = {
 
@@ -53,6 +60,29 @@ object Macros {
     lift(a)(Map.empty)
   }
 
+}
+
+object UnsafeExpr {
+  def open[T1, R, X](f: Expr[T1 => R])(content: (Expr[R], [t] => Expr[t] => Expr[T1] => Expr[t]) => X)(using qctx: QuoteContext): X = {
+    val (params, bodyExpr) = paramsAndBody[R](f)
+    content(bodyExpr, [t] => (e: Expr[t]) => (v: Expr[T1]) => bodyFn[t](e.unseal, params, List(v.unseal)).seal.asInstanceOf[Expr[t]])
+  }
+  private def paramsAndBody[R](using qctx: QuoteContext)(f: Expr[Any]): (List[qctx.reflect.ValDef], Expr[R]) = {
+    import qctx.reflect._
+    val Block(List(DefDef("$anonfun", Nil, List(params), _, Some(body))), Closure(Ident("$anonfun"), None)) = f.unseal.etaExpand
+    (params, body.seal.asInstanceOf[Expr[R]])
+  }
+
+  private def bodyFn[t](using qctx: QuoteContext)(e: qctx.reflect.Term, params: List[qctx.reflect.ValDef], args: List[qctx.reflect.Term]): qctx.reflect.Term = {
+    import qctx.reflect._
+    val map = params.map(_.symbol).zip(args).toMap
+    new TreeMap {
+      override def transformTerm(tree: Term)(using ctx: Context): Term =
+        super.transformTerm(tree) match
+          case tree: Ident => map.getOrElse(tree.symbol, tree)
+          case tree => tree
+    }.transformTerm(e)
+  }
 }
 
 def freshEnvVar()(using QuoteContext): (Int, Expr[DSL]) = {

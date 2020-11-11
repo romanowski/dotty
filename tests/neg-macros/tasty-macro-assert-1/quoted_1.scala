@@ -17,7 +17,7 @@ object Asserts {
 
     val tree = cond.unseal
 
-    def isOps(tpe: Type): Boolean = tpe match {
+    def isOps(tpe: TypeRepr): Boolean = tpe match {
       case tpe: TermRef => tpe.termSymbol.isDefDef && tpe.name == "Ops"// TODO check that the parent is Asserts
       case _ => false
     }
@@ -32,7 +32,7 @@ object Asserts {
 
     tree match {
       case Inlined(_, Nil, Apply(Select(OpsTree(left), op), right :: Nil)) =>
-        '{assertTrue(${left.seal.cast[Boolean]})} // Buggy code. To generate the errors
+        '{assertTrue(${left.asExprOf[Boolean]})} // Buggy code. To generate the errors
       case _ =>
         '{assertTrue($cond)}
     }

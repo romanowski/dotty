@@ -4,7 +4,7 @@ object Test extends App {
     extension (x: Int) def em: Boolean = x > 0
   }
 
-  assert(1.em == O.extension_em(1))
+  assert(1.em == O.em(1))
 
   case class Circle(x: Double, y: Double, radius: Double)
 
@@ -63,7 +63,7 @@ object Test extends App {
     val minimum: T
   }
 
-  given as Ord[Int] {
+  given Ord[Int] {
     extension (x: Int) def compareTo(y: Int) =
       if (x < y) -1 else if (x > y) +1 else 0
     val minimum = Int.MinValue
@@ -117,7 +117,7 @@ object Test extends App {
 
   def mappAll[F[_]: Monad, T](x: T, fs: List[T => T]): F[T] =
     fs.foldLeft(implicitly[Monad[F]].pure(x))((x: F[T], f: T => T) =>
-      if (true) implicitly[Monad[F]].extension_map(x)(f)
+      if (true) implicitly[Monad[F]].map(x)(f)
       else if (true) x.map(f)
       else x.map[T, T](f)
     )

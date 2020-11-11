@@ -150,19 +150,22 @@ trait SpaceLogic {
   })
 
   /** Flatten space to get rid of `Or` for pretty print */
-  def flatten(space: Space)(using Context): List[Space] = space match {
+  def flatten(space: Space)(using Context): Seq[Space] = space match {
     case Prod(tp, fun, spaces, full) =>
-      spaces.map(flatten) match {
-        case Nil => Prod(tp, fun, Nil, full) :: Nil
-        case ss  =>
-          ss.foldLeft(List[Prod]()) { (acc, flat) =>
-            if (acc.isEmpty) flat.map(s => Prod(tp, fun, s :: Nil, full))
-            else for (Prod(tp, fun, ss, full) <- acc; s <- flat) yield Prod(tp, fun, ss :+ s, full)
-          }
+      val ss = LazyList(spaces: _*).map(flatten)
+
+      ss.foldLeft(LazyList(Nil : List[Space])) { (acc, flat) =>
+        for { sps <- acc; s <- flat }
+        yield sps :+ s
+      }.map { sps =>
+        Prod(tp, fun, sps, full)
       }
+
     case Or(spaces) =>
-      spaces.flatMap(flatten _)
-    case _ => List(space)
+      LazyList(spaces: _*).flatMap(flatten)
+
+    case _ =>
+      List(space)
   }
 
   /** Is `a` a subspace of `b`? Equivalent to `a - b == Empty`, but faster */
@@ -477,8 +480,8 @@ class SpaceEngine(using Context) extends SpaceLogic {
           else args.map(arg => erase(arg, inArray = false))
         tp.derivedAppliedType(erase(tycon, inArray), args2)
 
-      case OrType(tp1, tp2) =>
-        OrType(erase(tp1, inArray), erase(tp2, inArray))
+      case tp as OrType(tp1, tp2) =>
+        OrType(erase(tp1, inArray), erase(tp2, inArray), tp.isSoft)
 
       case AndType(tp1, tp2) =>
         AndType(erase(tp1, inArray), erase(tp2, inArray))
@@ -527,14 +530,8 @@ class SpaceEngine(using Context) extends SpaceLogic {
   /** Parameter types of the case class type `tp`. Adapted from `unapplyPlan` in patternMatcher  */
   def signature(unapp: TermRef, scrutineeTp: Type, argLen: Int): List[Type] = {
     val unappSym = unapp.symbol
-    def caseClass = unappSym.owner.linkedClass
 
     // println("scrutineeTp = " + scrutineeTp.show)
-
-    lazy val caseAccessors = caseClass.caseAccessors.filter(_.is(Method))
-
-    def isSyntheticScala2Unapply(sym: Symbol) =
-      sym.isAllOf(SyntheticCase) && sym.owner.is(Scala2x)
 
     val mt: MethodType = unapp.widen match {
       case mt: MethodType => mt
@@ -564,9 +561,7 @@ class SpaceEngine(using Context) extends SpaceLogic {
     val resTp = mt.finalResultType
 
     val sig =
-      if (isSyntheticScala2Unapply(unappSym) && caseAccessors.length == argLen)
-        caseAccessors.map(_.info.asSeenFrom(mt.paramInfos.head, caseClass).widenExpr)
-      else if (resTp.isRef(defn.BooleanClass))
+      if (resTp.isRef(defn.BooleanClass))
         List()
       else {
         val isUnapplySeq = unappSym.name == nme.unapplySeq
@@ -584,7 +579,7 @@ class SpaceEngine(using Context) extends SpaceLogic {
           if (arity > 0)
             productSelectorTypes(resTp, unappSym.srcPos)
           else {
-            val getTp = resTp.select(nme.get).finalResultType.widen
+            val getTp = resTp.select(nme.get).finalResultType.widenTermRefExpr
             if (argLen == 1) getTp :: Nil
             else productSelectorTypes(getTp, unappSym.srcPos)
           }
@@ -846,8 +841,10 @@ class SpaceEngine(using Context) extends SpaceLogic {
         s != Empty && (!checkGADTSAT || satisfiable(s))
       }
 
-    if (uncovered.nonEmpty)
-      report.warning(PatternMatchExhaustivity(show(uncovered)), sel.srcPos)
+
+    if uncovered.nonEmpty then
+      val hasMore = uncovered.lengthCompare(6) > 0
+      report.warning(PatternMatchExhaustivity(show(uncovered.take(6)), hasMore), sel.srcPos)
   }
 
   private def redundancyCheckable(sel: Tree): Boolean =
@@ -870,7 +867,7 @@ class SpaceEngine(using Context) extends SpaceLogic {
       if (ctx.explicitNulls || selTyp.classSymbol.isPrimitiveValueClass)
         project(selTyp)
       else
-        project(OrType(selTyp, constantNullType))
+        project(OrType(selTyp, constantNullType, soft = false))
 
     // in redundancy check, take guard as false in order to soundly approximate
     def projectPrevCases(cases: List[CaseDef]): Space =

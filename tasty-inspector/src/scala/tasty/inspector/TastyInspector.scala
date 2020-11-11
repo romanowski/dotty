@@ -18,15 +18,41 @@ trait TastyInspector:
   self =>
 
   /** Process a TASTy file using TASTy reflect */
-  protected def processCompilationUnit(using QuoteContext)(root: qctx.tasty.Tree): Unit
+  protected def processCompilationUnit(using QuoteContext)(root: qctx.reflect.Tree): Unit
 
   /** Load and process TASTy files using TASTy reflect
    *
-   *  @param classpath Classpath where the classes are located
-   *  @param classes classes to be inspected
-   *  @return if an error was reported
+   *  @param tastyFiles List of paths of `.tasty` files
    */
-  def inspect(classpath: String, classes: List[String]): Boolean =
+  def inspectTastyFiles(tastyFiles: List[String]): Boolean =
+    inspectAllTastyFiles(tastyFiles, Nil, Nil)
+
+  /** Load and process TASTy files in a `jar` file using TASTy reflect
+   *
+   *  @param jars Path of `.jar` file
+   */
+  def inspectTastyFilesInJar(jar: String): Boolean =
+    inspectAllTastyFiles(Nil, List(jar), Nil)
+
+  /** Load and process TASTy files using TASTy reflect
+   *
+   *  @param tastyFiles List of paths of `.tasty` files
+   *  @param jars List of path of `.jar` files
+   *  @param dependenciesClasspath Classpath with extra dependencies needed to load class in the `.tasty` files
+   */
+  def inspectAllTastyFiles(tastyFiles: List[String], jars: List[String], dependenciesClasspath: List[String]): Boolean =
+    def checkFile(fileName: String, ext: String): Unit =
+      val file = dotty.tools.io.Path(fileName)
+      if file.extension != ext then
+        throw new IllegalArgumentException(s"File extension is not `.$ext`: $file")
+      else if !file.exists then
+        throw new IllegalArgumentException(s"File not found: ${file.toAbsolute}")
+    tastyFiles.foreach(checkFile(_, "tasty"))
+    jars.foreach(checkFile(_, "jar"))
+    val files = tastyFiles ::: jars
+    files.nonEmpty && inspectFiles(dependenciesClasspath, files)
+
+  private def inspectFiles(classpath: List[String], classes: List[String]): Boolean =
     if (classes.isEmpty)
       throw new IllegalArgumentException("Parameter classes should no be empty")
 
@@ -59,16 +85,17 @@ trait TastyInspector:
 
       override def run(implicit ctx: Context): Unit =
         val qctx = QuoteContextImpl()
-        self.processCompilationUnit(using qctx)(ctx.compilationUnit.tpdTree.asInstanceOf[qctx.tasty.Tree])
+        self.processCompilationUnit(using qctx)(ctx.compilationUnit.tpdTree.asInstanceOf[qctx.reflect.Tree])
 
     end TastyInspectorPhase
 
     val currentClasspath = ClasspathFromClassloader(getClass.getClassLoader)
-    val args = "-from-tasty" :: "-Yretain-trees" :: "-classpath" :: s"$classpath$pathSeparator$currentClasspath" :: classes
+    val fullClasspath = (classpath :+ currentClasspath).mkString(pathSeparator)
+    val args = "-from-tasty" :: "-Yretain-trees" :: "-classpath" :: fullClasspath :: classes
     val reporter = (new InspectorDriver).process(args.toArray)
     reporter.hasErrors
 
-  end inspect
+  end inspectFiles
 
 
 end TastyInspector

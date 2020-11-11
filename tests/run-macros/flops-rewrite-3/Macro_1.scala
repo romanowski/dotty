@@ -59,7 +59,7 @@ class CheckedTransformation(transform: PartialFunction[Expr[Any], Expr[Any]]) ex
   def apply[T: Type](e: Expr[T])(using QuoteContext): Expr[T] = {
     transform.applyOrElse(e, identity) match {
       case '{ $e2: T } => e2
-      case '{ $e2: $T } =>
+      case '{ $e2: t } =>
         throw new Exception(
           s"""Transformed
             |${e.show}
@@ -67,9 +67,9 @@ class CheckedTransformation(transform: PartialFunction[Expr[Any], Expr[Any]]) ex
             |${e2.show}
             |
             |Expected type to be
-            |${summon[Type[T]].show}
+            |${Type.show[T]}
             |but was
-            |${Type[T].show}
+            |${Type.show[t]}
           """.stripMargin)
     }
   }
@@ -92,7 +92,7 @@ private object Rewriter {
   def apply(): Rewriter = new Rewriter(Nil, Nil, false)
 }
 
-private class Rewriter private (preTransform: List[Transformation] = Nil, postTransform: List[Transformation] = Nil, fixPoint: Boolean) extends util.ExprMap {
+private class Rewriter private (preTransform: List[Transformation] = Nil, postTransform: List[Transformation] = Nil, fixPoint: Boolean) extends ExprMap {
 
   def withFixPoint: Rewriter =
     new Rewriter(preTransform, postTransform, fixPoint = true)

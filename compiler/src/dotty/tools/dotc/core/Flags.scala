@@ -152,6 +152,10 @@ object Flags {
     def flagsString: String = x.flagStrings("").mkString(" ")
   }
 
+  // Temporary while extension names are in flux
+  def or(x1: FlagSet, x2: FlagSet) = x1 | x2
+  def and(x1: FlagSet, x2: FlagSet) = x1 & x2
+
   def termFlagSet(x: Long) = FlagSet(TERMS | x)
 
   private inline val TYPESHIFT = 2
@@ -223,7 +227,7 @@ object Flags {
   val (Final @ _, _, _) = newFlags(6, "final")
 
   /** A method symbol / a super trait */
-  val (_, Method @ _, SuperTrait @ _) = newFlags(7, "<method>", "super")
+  val (_, Method @ _, _) = newFlags(7, "<method>")
 
   /** A (term or type) parameter to a class or method */
   val (Param @ _, TermParam @ _, TypeParam @ _) = newFlags(8, "<param>")
@@ -433,8 +437,7 @@ object Flags {
    *  TODO: Should check that FromStartFlags do not change in completion
    */
   val FromStartFlags: FlagSet = commonFlags(
-    Module, Package, Deferred, Method, Case, Enum,
-    SuperTrait, Param, ParamAccessor,
+    Module, Package, Deferred, Method, Case, Enum, Param, ParamAccessor,
     Scala2SpecialFlags, MutableOrOpen, Opaque, Touched, JavaStatic,
     OuterOrCovariant, LabelOrContravariant, CaseAccessor,
     Extension, NonMember, Implicit, Given, Permanent, Synthetic,

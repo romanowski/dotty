@@ -3,9 +3,8 @@ import scala.quoted._
 object Test {
   def staged[T](using qctx: QuoteContext) = {
     import qctx.reflect._
-    given typeT as quoted.Type[T] // error
-    val tTypeTree = typeT.unseal
-    val tt = Type.of[T]
+    given typeT as Type[T] // error
+    val tt = TypeRepr.of[T]
     '{ "in staged" }
   }
 

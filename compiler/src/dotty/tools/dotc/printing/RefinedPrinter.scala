@@ -20,7 +20,7 @@ import typer.ProtoTypes._
 import Trees._
 import TypeApplications._
 import Decorators._
-import scala.internal.Chars.isOperatorPart
+import util.Chars.isOperatorPart
 import transform.TypeUtils._
 import transform.SymUtils._
 
@@ -84,7 +84,7 @@ class RefinedPrinter(_ctx: Context) extends PlainPrinter(_ctx) {
     nameString(if (ctx.property(XprintMode).isEmpty) sym.initial.name else sym.name)
 
   override def fullNameString(sym: Symbol): String =
-    if (isEmptyPrefix(sym.maybeOwner)) nameString(sym)
+    if !sym.exists || isEmptyPrefix(sym.effectiveOwner) then nameString(sym)
     else super.fullNameString(sym)
 
   override protected def fullNameOwner(sym: Symbol): Symbol = {
@@ -214,8 +214,10 @@ class RefinedPrinter(_ctx: Context) extends PlainPrinter(_ctx) {
       // of AndType and OrType to account for associativity
       case AndType(tp1, tp2) =>
         toTextInfixType(tpnme.raw.AMP, tp1, tp2) { toText(tpnme.raw.AMP) }
-      case OrType(tp1, tp2) =>
-        toTextInfixType(tpnme.raw.BAR, tp1, tp2) { toText(tpnme.raw.BAR) }
+      case tp as OrType(tp1, tp2) =>
+        toTextInfixType(tpnme.raw.BAR, tp1, tp2) {
+          if tp.isSoft && printDebug then toText(tpnme.ZOR) else toText(tpnme.raw.BAR)
+        }
       case tp @ EtaExpansion(tycon)
       if !printDebug && appliedText(tp.asInstanceOf[HKLambda].resType).isEmpty =>
         // don't eta contract if the application would be printed specially
@@ -376,8 +378,7 @@ class RefinedPrinter(_ctx: Context) extends PlainPrinter(_ctx) {
         else if (name.isTypeName) typeText(txt)
         else txt
       case tree @ Select(qual, name) =>
-        if (!printDebug && tree.hasType && tree.symbol.isTypeSplice) typeText("${") ~ toTextLocal(qual) ~ typeText("}")
-        else if (qual.isType) toTextLocal(qual) ~ "#" ~ typeText(toText(name))
+        if (qual.isType) toTextLocal(qual) ~ "#" ~ typeText(toText(name))
         else toTextLocal(qual) ~ ("." ~ nameIdText(tree) provided (name != nme.CONSTRUCTOR || printDebug))
       case tree: This =>
         optDotPrefix(tree) ~ keywordStr("this") ~ idText(tree)
@@ -737,7 +738,7 @@ class RefinedPrinter(_ctx: Context) extends PlainPrinter(_ctx) {
     if mdef.hasType then Modifiers(mdef.symbol) else mdef.rawMods
 
   private def Modifiers(sym: Symbol): Modifiers = untpd.Modifiers(
-    sym.flags & (if (sym.isType) ModifierFlags | VarianceFlags | SuperTrait else ModifierFlags),
+    sym.flags & (if (sym.isType) ModifierFlags | VarianceFlags else ModifierFlags),
     if (sym.privateWithin.exists) sym.privateWithin.asType.name else tpnme.EMPTY,
     sym.annotations.filterNot(ann => dropAnnotForModText(ann.symbol)).map(_.tree))
 
@@ -751,11 +752,9 @@ class RefinedPrinter(_ctx: Context) extends PlainPrinter(_ctx) {
   private def useSymbol(tree: untpd.Tree) =
     tree.hasType && tree.symbol.exists && ctx.settings.YprintSyms.value
 
-  protected def nameIdText[T >: Untyped](tree: NameTree[T], dropExtension: Boolean = false): Text =
+  protected def nameIdText[T >: Untyped](tree: NameTree[T]): Text =
     if (tree.hasType && tree.symbol.exists) {
-      var str = nameString(tree.symbol)
-      if tree.symbol.is(ExtensionMethod) && dropExtension && str.startsWith("extension_") then
-        str = str.drop("extension_".length)
+      val str = nameString(tree.symbol)
       tree match {
         case tree: RefTree => withPos(str, tree.sourcePos)
         case tree: MemberDef => withPos(str, tree.sourcePos.withSpan(tree.nameSpan))
@@ -807,7 +806,7 @@ class RefinedPrinter(_ctx: Context) extends PlainPrinter(_ctx) {
               case vparams1 :: rest =>
                 (vparams1, rest)
             (keywordStr("extension") ~~ paramsText(leadingParams)
-             ~~ (defKeyword ~~ valDefText(nameIdText(tree, dropExtension = true))).close,
+             ~~ (defKeyword ~~ valDefText(nameIdText(tree))).close,
              otherParamss)
           else (defKeyword ~~ valDefText(nameIdText(tree)), tree.vparamss)
 
@@ -857,10 +856,7 @@ class RefinedPrinter(_ctx: Context) extends PlainPrinter(_ctx) {
   }
 
   protected def templateText(tree: TypeDef, impl: Template): Text = {
-    val kw =
-      if tree.mods.is(SuperTrait) then "super trait"
-      else if tree.mods.is(Trait) then "trait"
-      else "class"
+    val kw = if tree.mods.is(Trait) then "trait" else "class"
     val decl = modText(tree.mods, tree.symbol, keywordStr(kw), isType = true)
     ( decl ~~ typeText(nameIdText(tree)) ~ withEnclosingDef(tree) { toTextTemplate(impl) }
     // ~ (if (tree.hasType && printDebug) i"[decls = ${tree.symbol.info.decls}]" else "") // uncomment to enable
@@ -884,6 +880,11 @@ class RefinedPrinter(_ctx: Context) extends PlainPrinter(_ctx) {
   protected def constrText(tree: untpd.Tree): Text = toTextLocal(tree).stripPrefix(keywordStr("new ")) // DD
 
   protected def annotText(tree: untpd.Tree): Text = "@" ~ constrText(tree) // DD
+
+  override def annotsText(sym: Symbol): Text =
+    Text(sym.annotations.map(ann =>
+      if ann.symbol == defn.BodyAnnot then Str(simpleNameString(ann.symbol))
+      else annotText(ann.tree)))
 
   protected def modText(mods: untpd.Modifiers, sym: Symbol, kw: String, isType: Boolean): Text = { // DD
     val suppressKw = if (enclDefIsClass) mods.isAllOf(LocalParam) else mods.is(Param)
@@ -967,7 +968,6 @@ class RefinedPrinter(_ctx: Context) extends PlainPrinter(_ctx) {
     else if (sym.isPackageObject) "package object"
     else if (flags.is(Module) && flags.is(Case)) "case object"
     else if (sym.isClass && flags.is(Case)) "case class"
-    else if sym.isClass && flags.is(SuperTrait) then "super trait"
     else super.keyString(sym)
   }
 

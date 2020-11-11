@@ -600,8 +600,8 @@ trait Applications extends Compatibility {
             args match {
               case arg :: Nil if isVarArg(arg) =>
                 addTyped(arg, formal)
-              case Typed(Literal(Constant(null)), _) :: Nil =>
-                addTyped(args.head, formal)
+              case (arg as Typed(Literal(Constant(null)), _)) :: Nil if ctx.isAfterTyper =>
+                addTyped(arg, formal)
               case _ =>
                 val elemFormal = formal.widenExpr.argTypesLo.head
                 val typedArgs =
@@ -1057,6 +1057,11 @@ trait Applications extends Compatibility {
 
   def typedNamedArgs(args: List[untpd.Tree])(using Context): List[NamedArg] =
     for (arg @ NamedArg(id, argtpt) <- args) yield {
+      if !Feature.namedTypeArgsEnabled then
+        report.error(
+          i"""Named type arguments are experimental,
+             |they must be enabled with a `experimental.namedTypeArguments` language import or setting""",
+          arg.srcPos)
       val argtpt1 = typedType(argtpt)
       cpy.NamedArg(arg)(id, argtpt1).withType(argtpt1.tpe)
     }
@@ -1128,7 +1133,7 @@ trait Applications extends Compatibility {
        && tree.tpe.classSymbol.isEnumCase
        && tree.tpe.widen.isValueType
     then
-      val widened = TypeComparer.dropSuperTraits(
+      val widened = TypeComparer.dropMixinTraits(
         tree.tpe.parents.reduceLeft(TypeComparer.andType(_, _)),
         pt)
       if widened <:< pt then Typed(tree, TypeTree(widened))
@@ -1182,7 +1187,7 @@ trait Applications extends Compatibility {
             typedType(untpd.rename(tree, tree.name.toTypeName))(using nestedCtx)
           ttree.tpe match {
             case alias: TypeRef if alias.info.isTypeAlias && !nestedCtx.reporter.hasErrors =>
-              companionRef(alias) match {
+              Inferencing.companionRef(alias) match {
                 case companion: TermRef => return untpd.ref(companion).withSpan(tree.span)
                 case _ =>
               }
@@ -1387,7 +1392,7 @@ trait Applications extends Compatibility {
   }
 
   /** Does `tp` have an extension method named `xname` with this-argument `argType` and
-   *  result matching `resultType`? `xname` is supposed to start with `extension_`.
+   *  result matching `resultType`?
    */
   def hasExtensionMethodNamed(tp: Type, xname: TermName, argType: Type, resultType: Type)(using Context) = {
     def qualifies(mbr: Denotation) =
@@ -2157,7 +2162,9 @@ trait Applications extends Compatibility {
 
     val (core, pt1) = normalizePt(methodRef, pt)
     val app = withMode(Mode.SynthesizeExtMethodReceiver) {
-      typed(untpd.Apply(core, untpd.TypedSplice(receiver) :: Nil), pt1, ctx.typerState.ownedVars)
+      typed(
+        untpd.Apply(core, untpd.TypedSplice(receiver, isExtensionReceiver = true) :: Nil),
+        pt1, ctx.typerState.ownedVars)
     }
     def isExtension(tree: Tree): Boolean = methPart(tree) match {
       case Inlined(call, _, _) => isExtension(call)

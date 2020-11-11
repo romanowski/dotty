@@ -1,6 +1,7 @@
 import scala.quoted._
 import scala.quoted.staging._
-import scala.quoted.util._
+import language.experimental.namedTypeArguments
+
 /**
   * Port of the strymonas library as described in O. Kiselyov et al., Stream fusion, to completeness (POPL 2017)
   */
@@ -676,5 +677,24 @@ object Test {
     println(run(test9()))
     println
     println(run(test10()))
+  }
+}
+
+sealed trait Var[T] {
+  def get(using qctx: QuoteContext): Expr[T]
+  def update(e: Expr[T])(using qctx: QuoteContext): Expr[Unit]
+}
+
+object Var {
+  def apply[T: Type, U: Type](init: Expr[T])(body: Var[T] => Expr[U])(using qctx: QuoteContext): Expr[U] = '{
+    var x = $init
+    ${
+      body(
+        new Var[T] {
+          def get(using qctx: QuoteContext): Expr[T] = 'x
+          def update(e: Expr[T])(using qctx: QuoteContext): Expr[Unit] = '{ x = $e }
+        }
+      )
+    }
   }
 }

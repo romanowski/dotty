@@ -1,7 +1,5 @@
 import scala.quoted._
 
-import scala.quoted.unsafe._
-
 object Macros {
 
 
@@ -20,7 +18,7 @@ object Macros {
     object FromEnv {
       def unapply[T](e: Expr[Any])(using env: Env): Option[Expr[R[T]]] =
         e match
-          case '{envVar[$_](${Const(id)})} =>
+          case '{envVar[t](${Const(id)})} =>
             env.get(id).asInstanceOf[Option[Expr[R[T]]]] // We can only add binds that have the same type as the refs
           case _ =>
             None
@@ -39,11 +37,11 @@ object Macros {
       case '{ ($x: Int) <= ($y: Int) } =>
         '{ $sym.leq(${lift(x)}, ${lift(y)}).asInstanceOf[R[T]] }
 
-      case '{ ${f}($arg: $A): $B } =>
-        '{ $sym.app[A, B](${lift(f)}, ${lift(arg)}).asInstanceOf[R[T]] }
+      case '{ ${f}($arg: a): b } =>
+        '{ $sym.app[a, b](${lift(f)}, ${lift(arg)}).asInstanceOf[R[T]] }
 
-      case '{ (if ($cond) $thenp else $elsep): $A } =>
-        '{ $sym.ifThenElse[A](${lift(cond)}, ${lift(thenp)}, ${lift(elsep)}) }.asInstanceOf[Expr[R[T]]]
+      case '{ (if ($cond) $thenp else $elsep): a } =>
+        '{ $sym.ifThenElse[a](${lift(cond)}, ${lift(thenp)}, ${lift(elsep)}) }.asInstanceOf[Expr[R[T]]]
 
       case '{ (x0: Int) => $bodyFn(x0): Any } =>
         val (i, nEnvVar) = freshEnvVar[Int]()
@@ -60,8 +58,8 @@ object Macros {
         val body2 = UnsafeExpr.open(bodyFn) { (body1, close) => close(body1)(nEnvVar) }
         '{ $sym.lam((x: R[Int => Int]) => ${given Env = envWith(i, 'x)(using env); lift(body2)}).asInstanceOf[R[T]] }
 
-      case '{ Symantics.fix[$A, $B]($f) } =>
-        '{ $sym.fix[A, B]((x: R[A => B]) => $sym.app(${lift(f)}, x)).asInstanceOf[R[T]] }
+      case '{ Symantics.fix[a, b]($f) } =>
+        '{ $sym.fix[a, b]((x: R[a => b]) => $sym.app(${lift(f)}, x)).asInstanceOf[R[T]] }
 
       case FromEnv(expr) => expr.asInstanceOf[Expr[R[T]]]
 
@@ -74,6 +72,29 @@ object Macros {
     lift(expr)
   }
 
+}
+
+object UnsafeExpr {
+  def open[T1, R, X](f: Expr[T1 => R])(content: (Expr[R], [t] => Expr[t] => Expr[T1] => Expr[t]) => X)(using qctx: QuoteContext): X = {
+    val (params, bodyExpr) = paramsAndBody[R](f)
+    content(bodyExpr, [t] => (e: Expr[t]) => (v: Expr[T1]) => bodyFn[t](e.unseal, params, List(v.unseal)).seal.asInstanceOf[Expr[t]])
+  }
+  private def paramsAndBody[R](using qctx: QuoteContext)(f: Expr[Any]): (List[qctx.reflect.ValDef], Expr[R]) = {
+    import qctx.reflect._
+    val Block(List(DefDef("$anonfun", Nil, List(params), _, Some(body))), Closure(Ident("$anonfun"), None)) = f.unseal.etaExpand
+    (params, body.seal.asInstanceOf[Expr[R]])
+  }
+
+  private def bodyFn[t](using qctx: QuoteContext)(e: qctx.reflect.Term, params: List[qctx.reflect.ValDef], args: List[qctx.reflect.Term]): qctx.reflect.Term = {
+    import qctx.reflect._
+    val map = params.map(_.symbol).zip(args).toMap
+    new TreeMap {
+      override def transformTerm(tree: Term)(using ctx: Context): Term =
+        super.transformTerm(tree) match
+          case tree: Ident => map.getOrElse(tree.symbol, tree)
+          case tree => tree
+    }.transformTerm(e)
+  }
 }
 
 def freshEnvVar[T: Type]()(using QuoteContext): (Int, Expr[T]) = {

@@ -7,14 +7,12 @@ object Macros {
   private def impl[A, B](a: Expr[A], b: Expr[B])(using qctx: QuoteContext) : Expr[Unit] = {
     import qctx.reflect._
 
-    val res = scala.internal.quoted.Expr.unapply[Tuple, Tuple](a)(using b, qctx).map { tup =>
+    val res = qctx.asInstanceOf[scala.internal.quoted.QuoteContextInternal].ExprMatch.unapply[Tuple, Tuple](a)(using b).map { tup =>
       tup.toArray.toList.map {
         case r: Expr[_] =>
-          s"Expr(${r.unseal.show})"
-        case r: quoted.Type[_] =>
-          s"Type(${r.unseal.show})"
-        case r: String =>
-          s"String($r)"
+          s"Expr(${r.show})"
+        case t: Type[_] =>
+          s"Type(${Type.show(using t)})"
       }
     }
 

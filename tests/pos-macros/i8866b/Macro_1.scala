@@ -9,12 +9,12 @@ object Macro {
   def impl(using qctx: QuoteContext): Expr[Int] = {
     import qctx.reflect._
 
-    let(
+    ValDef.let(
       Select.unique(
         '{ Other }.unseal,
         "apply"
       )
-    )(identity).seal.cast[Int]
+    )(identity).asExprOf[Int]
 
   }
 

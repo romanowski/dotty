@@ -50,7 +50,7 @@ class Compiler {
   /** Phases dealing with TASTY tree pickling and unpickling */
   protected def picklerPhases: List[List[Phase]] =
     List(new Pickler) ::            // Generate TASTY info
-    List(new ReifyQuotes) ::        // Turn quoted trees into explicit run-time data structures
+    List(new PickleQuotes) ::       // Turn quoted trees into explicit run-time data structures
     Nil
 
   /** Phases dealing with the transformation from pickled trees to backend trees */
@@ -76,8 +76,7 @@ class Compiler {
          new sjs.ExplicitJSClasses,  // Make all JS classes explicit (Scala.js only)
          new ExplicitOuter,          // Add accessors to outer classes from nested ones.
          new ExplicitSelf,           // Make references to non-trivial self types explicit as casts
-         new StringInterpolatorOpt,  // Optimizes raw and s string interpolators by rewriting them to string concatentations
-         new CrossCastAnd) ::        // Normalize selections involving intersection types.
+         new StringInterpolatorOpt) :: // Optimizes raw and s string interpolators by rewriting them to string concatentations
     List(new PruneErasedDefs,        // Drop erased definitions from scopes and simplify erased expressions
          new InlinePatterns,         // Remove placeholders of inlined patterns
          new VCInlineMethods,        // Inlines calls to value class methods

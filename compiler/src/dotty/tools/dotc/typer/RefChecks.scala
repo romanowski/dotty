@@ -18,12 +18,13 @@ import config.{ScalaVersion, NoScalaVersion}
 import Decorators._
 import typer.ErrorReporting._
 import config.Feature.{warnOnMigration, migrateTo3}
+import config.Printers.refcheck
 import reporting._
 import scala.util.matching.Regex._
 import Constants.Constant
 
 object RefChecks {
-  import tpd.{Tree, MemberDef, Literal, Template, DefDef}
+  import tpd.{Tree, MemberDef, NamedArg, Literal, Template, DefDef}
 
   val name: String = "refchecks"
 
@@ -236,6 +237,26 @@ object RefChecks {
       i"${if (showLocation) sym1.showLocated else sym1}$infoStr"
     }
 
+    def compatibleTypes(member: Symbol, memberTp: Type, other: Symbol, otherTp: Type, fallBack: => Boolean = false): Boolean =
+      try
+        if (member.isType) // intersection of bounds to refined types must be nonempty
+          memberTp.bounds.hi.hasSameKindAs(otherTp.bounds.hi) &&
+          ((memberTp frozen_<:< otherTp) ||
+            !member.owner.derivesFrom(other.owner) && {
+              // if member and other come from independent classes or traits, their
+              // bounds must have non-empty-intersection
+              val jointBounds = (memberTp.bounds & otherTp.bounds).bounds
+              jointBounds.lo frozen_<:< jointBounds.hi
+            })
+        else
+          member.name.is(DefaultGetterName) || // default getters are not checked for compatibility
+          memberTp.overrides(otherTp,
+              member.matchNullaryLoosely || other.matchNullaryLoosely || fallBack)
+      catch case ex: MissingType =>
+        // can happen when called with upwardsSelf as qualifier of memberTp and otherTp,
+        // because in that case we might access types that are not members of the qualifier.
+        false
+
     /* Check that all conditions for overriding `other` by `member`
        * of class `clazz` are met.
        */
@@ -245,7 +266,7 @@ object RefChecks {
         else self.memberInfo(member)
       def otherTp(self: Type) = self.memberInfo(other)
 
-      report.debuglog("Checking validity of %s overriding %s".format(member.showLocated, other.showLocated))
+      refcheck.println(i"check override ${infoString(member)} overriding ${infoString(other)}")
 
       def noErrorType = !memberTp(self).isErroneous && !otherTp(self).isErroneous
 
@@ -264,6 +285,12 @@ object RefChecks {
         "error overriding %s;\n  %s %s%s".format(
           infoStringWithLocation(other), infoString(member), msg, addendum)
       }
+
+      def compatTypes(memberTp: Type, otherTp: Type): Boolean =
+        compatibleTypes(member, memberTp, other, otherTp,
+          fallBack = warnOnMigration(
+            overrideErrorMsg("no longer has compatible type"),
+            (if (member.owner == clazz) member else clazz).srcPos))
 
       def emitOverrideError(fullmsg: String) =
         if (!(hasErrors && member.is(Synthetic) && member.is(Module))) {
@@ -291,29 +318,14 @@ object RefChecks {
           (if (otherAccess == "") "public" else "at least " + otherAccess))
       }
 
-      def compatibleTypes(memberTp: Type, otherTp: Type): Boolean =
-        try
-          if (member.isType) // intersection of bounds to refined types must be nonempty
-            memberTp.bounds.hi.hasSameKindAs(otherTp.bounds.hi) &&
-            ((memberTp frozen_<:< otherTp) ||
-             !member.owner.derivesFrom(other.owner) && {
-               // if member and other come from independent classes or traits, their
-               // bounds must have non-empty-intersection
-               val jointBounds = (memberTp.bounds & otherTp.bounds).bounds
-               jointBounds.lo frozen_<:< jointBounds.hi
-             })
-          else
-            member.name.is(DefaultGetterName) || // default getters are not checked for compatibility
-            memberTp.overrides(otherTp,
-                member.matchNullaryLoosely || other.matchNullaryLoosely ||
-                warnOnMigration(overrideErrorMsg("no longer has compatible type"),
-                   (if (member.owner == clazz) member else clazz).srcPos))
-        catch {
-          case ex: MissingType =>
-            // can happen when called with upwardsSelf as qualifier of memberTp and otherTp,
-            // because in that case we might access types that are not members of the qualifier.
-            false
-        }
+      def overrideTargetNameError() =
+        val otherTargetName = i"@targetName(${other.targetName})"
+        if member.hasTargetName(member.name) then
+          overrideError(i"misses a target name annotation $otherTargetName")
+        else if other.hasTargetName(other.name) then
+          overrideError(i"should not have a @targetName annotation since the overridden member hasn't one either")
+        else
+          overrideError(i"has a different target name annotation; it should be $otherTargetName")
 
       //Console.println(infoString(member) + " overrides " + infoString(other) + " in " + clazz);//DEBUG
 
@@ -359,7 +371,9 @@ object RefChecks {
            && (ob.isContainedIn(mb) || other.isAllOf(JavaProtected))
              // m relaxes o's access boundary,
              // or o is Java defined and protected (see #3946)
-      if (!isOverrideAccessOK)
+      if !member.hasTargetName(other.targetName) then
+        overrideTargetNameError()
+      else if (!isOverrideAccessOK)
         overrideAccessError()
       else if (other.isClass)
         // direct overrides were already checked on completion (see Checking.chckWellFormed)
@@ -428,14 +442,14 @@ object RefChecks {
         overrideError("is not inline, cannot implement an inline method")
       else if (other.isScala2Macro && !member.isScala2Macro) // (1.11)
         overrideError("cannot be used here - only Scala-2 macros can override Scala-2 macros")
-      else if (!compatibleTypes(memberTp(self), otherTp(self)) &&
-                 !compatibleTypes(memberTp(upwardsSelf), otherTp(upwardsSelf)))
+      else if (!compatTypes(memberTp(self), otherTp(self)) &&
+                 !compatTypes(memberTp(upwardsSelf), otherTp(upwardsSelf)))
         overrideError("has incompatible type" + err.whyNoMatchStr(memberTp(self), otherTp(self)))
-      else if (member.erasedName != other.erasedName)
-        if (other.erasedName != other.name)
-          overrideError(i"needs to be declared with @alpha(${"\""}${other.erasedName}${"\""}) so that external names match")
+      else if (member.targetName != other.targetName)
+        if (other.targetName != other.name)
+          overrideError(i"needs to be declared with @targetName(${"\""}${other.targetName}${"\""}) so that external names match")
         else
-          overrideError("cannot have an @alpha annotation since external names would be different")
+          overrideError("cannot have a @targetName annotation since external names would be different")
       else
         checkOverrideDeprecated()
     }
@@ -451,7 +465,27 @@ object RefChecks {
           }*/
     }
 
-    val opc = new OverridingPairs.Cursor(clazz)
+    val opc = new OverridingPairs.Cursor(clazz):
+
+      /** We declare a match if either we have a full match including matching names
+       *  or we have a loose match with different target name but the types are the same.
+       *  This leaves two possible sorts of discrepancies to be reported as errors
+       *  in `checkOveride`:
+       *
+       *    - matching names, target names, and signatures but different types
+       *    - matching names and types, but different target names
+       */
+      override def matches(sym1: Symbol, sym2: Symbol): Boolean =
+        sym1.isType
+        || {
+          val sd1 = sym1.asSeenFrom(clazz.thisType)
+          val sd2 = sym2.asSeenFrom(clazz.thisType)
+          sd1.matchesLoosely(sd2)
+          && (sym1.hasTargetName(sym2.targetName)
+             || compatibleTypes(sym1, sd1.info, sym2, sd2.info))
+        }
+    end opc
+
     while opc.hasNext do
       checkOverride(opc.overriding, opc.overridden)
       opc.next()
@@ -957,18 +991,11 @@ object RefChecks {
    *  (i.e. they refer to a type variable that really occurs in the signature of the annotated symbol.)
    */
   private object checkImplicitNotFoundAnnotation:
-
     /** Warns if the class or trait has an @implicitNotFound annotation
      *  with invalid type variable references.
      */
     def template(sd: SymDenotation)(using Context): Unit =
-      for
-        annotation <- sd.getAnnotation(defn.ImplicitNotFoundAnnot)
-        l@Literal(c: Constant) <- annotation.argument(0)
-      do forEachTypeVariableReferenceIn(c.stringValue) { case (ref, start) =>
-        if !sd.typeParams.exists(_.denot.name.show == ref) then
-          reportInvalidReferences(l, ref, start, sd)
-      }
+      checkReferences(sd)
 
     /** Warns if the def has parameters with an `@implicitNotFound` annotation
      *  with invalid type variable references.
@@ -977,26 +1004,42 @@ object RefChecks {
       for
         paramSymss <- sd.paramSymss
         param <- paramSymss
-      do
-        for
-          annotation <- param.getAnnotation(defn.ImplicitNotFoundAnnot)
-          l@Literal(c: Constant) <- annotation.argument(0)
-        do forEachTypeVariableReferenceIn(c.stringValue) { case (ref, start) =>
-          if !sd.paramSymss.flatten.exists(_.name.show == ref) then
-            reportInvalidReferences(l, ref, start, sd)
-        }
+        if param.isTerm
+      do checkReferences(param.denot)
 
-    /** Reports an invalid reference to a type variable `typeRef` that was found in `l` */
-    private def reportInvalidReferences(
-      l: Literal,
+    private object PositionedStringLiteralArgument:
+      def unapply(tree: Tree): Option[(String, Span)] = tree match {
+        case l@Literal(Constant(s: String)) => Some((s, l.span))
+        case NamedArg(_, l@Literal(Constant(s: String))) => Some((s, l.span))
+        case _ => None
+      }
+
+    private def checkReferences(sd: SymDenotation)(using Context): Unit =
+      lazy val substitutableTypesNames =
+        ErrorReporting.substitutableTypeSymbolsInScope(sd.symbol).map(_.denot.name.show)
+      for
+        annotation <- sd.getAnnotation(defn.ImplicitNotFoundAnnot)
+        PositionedStringLiteralArgument(msg, span) <- annotation.argument(0)
+      do forEachTypeVariableReferenceIn(msg) { case (ref, start) =>
+        if !substitutableTypesNames.contains(ref) then
+          reportInvalidReference(span, ref, start, sd)
+      }
+
+    /** Reports an invalid reference to a type variable `typeRef` that was found in `span` */
+    private def reportInvalidReference(
+      span: Span,
       typeRef: String,
-      offsetInLiteral: Int,
+      variableOffsetinArgumentLiteral: Int,
       sd: SymDenotation
     )(using Context) =
-      val msg = InvalidReferenceInImplicitNotFoundAnnotation(
-        typeRef, if (sd.isConstructor) "the constructor" else sd.name.show)
-      val span = l.span.shift(offsetInLiteral + 1) // +1 because of 0-based index
-      val pos = ctx.source.atSpan(span.startPos)
+      val typeRefName = s"`$typeRef`"
+      val ownerName =
+        if sd.isType then s"type `${sd.name.show}`"
+        else if sd.owner.isConstructor then s"the constructor of `${sd.owner.owner.name.show}`"
+        else s"method `${sd.owner.name.show}`"
+      val msg = InvalidReferenceInImplicitNotFoundAnnotation(typeRefName, ownerName)
+      val startPos = span.shift(variableOffsetinArgumentLiteral + 1).startPos // +1 because of 0-based index
+      val pos = ctx.source.atSpan(startPos)
       report.warning(msg, pos)
 
     /** Calls the supplied function for each quoted reference to a type variable in <pre>s</pre>.
@@ -1013,10 +1056,15 @@ object RefChecks {
      * @param f A function to apply to every pair of (\<type variable>, \<position in string>).
      */
     private def forEachTypeVariableReferenceIn(s: String)(f: (String, Int) => Unit) =
-      // matches quoted references such as "${(A)}", "${(Abc)}", etc.
-      val reference = """(?<=\$\{)[a-zA-Z]+(?=\})""".r
-      val matches = reference.findAllIn(s)
-      for m <- matches do f(m, matches.start)
+      // matches quoted references such as "${A}", "${ Abc }", etc.
+      val referencePattern = """\$\{\s*([^}\s]+)\s*\}""".r
+      val matches = referencePattern.findAllIn(s)
+      for reference <- matches do
+        val referenceOffset = matches.start
+        val prefixlessReference = reference.replaceFirst("""\$\{\s*""", "")
+        val variableOffset = referenceOffset + reference.length - prefixlessReference.length
+        val variableName = prefixlessReference.replaceFirst("""\s*\}""", "")
+        f(variableName, variableOffset)
 
   end checkImplicitNotFoundAnnotation
 

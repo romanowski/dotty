@@ -18,6 +18,9 @@ object DottyPlugin extends AutoPlugin {
     val isDotty = settingKey[Boolean]("Is this project compiled with Dotty?")
     val isDottyJS = settingKey[Boolean]("Is this project compiled with Dotty and Scala.js?")
 
+    val useScala3doc = settingKey[Boolean]("Use Scala3doc as the documentation tool")
+    val scala3docOptions = settingKey[Seq[String]]("Options for Scala3doc")
+
     // NOTE:
     // - this is a def to support `scalaVersion := dottyLatestNightlyBuild`
     // - if this was a taskKey, then you couldn't do `scalaVersion := dottyLatestNightlyBuild`
@@ -90,8 +93,8 @@ object DottyPlugin extends AutoPlugin {
        *  with Dotty this will change the cross-version to a Scala 2.x one. This
        *  works because Dotty is currently retro-compatible with Scala 2.x.
        *
-       *  NOTE: As a special-case, the cross-version of dotty-library, dotty-compiler and
-       *  dotty will never be rewritten because we know that they're Dotty-only.
+       *  NOTE: As a special-case, the cross-version of scala3-library and scala3-compiler
+       *  will never be rewritten because we know that they're Scala 3 only.
        *  This makes it possible to do something like:
        *  {{{
        *  libraryDependencies ~= (_.map(_.withDottyCompat(scalaVersion.value)))
@@ -99,7 +102,8 @@ object DottyPlugin extends AutoPlugin {
        */
       def withDottyCompat(scalaVersion: String): ModuleID = {
         val name = moduleID.name
-        if (name != "scala3" && name != "scala3-library" && name != "scala3-compiler")
+        if (name != "scala3-library" && name != "scala3-compiler" &&
+            name != "dotty" && name != "dotty-library" && name != "dotty-compiler")
           moduleID.crossVersion match {
             case binary: librarymanagement.Binary =>
               val compatVersion =
@@ -353,10 +357,27 @@ object DottyPlugin extends AutoPlugin {
           Def.valueStrict { scalaInstance.taskValue }
       }.value,
 
-      // We need more stuff on the classpath to run the `doc` task.
+      // Configuration for the doctool
+      resolvers ++= (if(!useScala3doc.value) Nil else Seq(Resolver.jcenterRepo)),
+      useScala3doc := false,
+      scala3docOptions := Nil,
+      Compile / doc / scalacOptions := {
+        // We are passing scala3doc argument list as single argument to scala instance starting with magic prefix "--+DOC+"
+        val s3dOpts = scala3docOptions.value.map("--+DOC+" + _)
+        val s3cOpts = (Compile / doc / scalacOptions).value
+        if (isDotty.value && useScala3doc.value) {
+           s3dOpts ++ s3cOpts
+        } else {
+          s3cOpts
+        }
+      },
+      // We need to add doctool classes to the classpath so they can be called
       scalaInstance in doc := Def.taskDyn {
         if (isDotty.value)
-          dottyScalaInstanceTask(scala3Artefact(scalaVersion.value, "doc"))
+          if (useScala3doc.value)
+            dottyScalaInstanceTask("scala3doc")
+          else
+            dottyScalaInstanceTask(scala3Artefact(scalaVersion.value, "doc"))
         else
           Def.valueStrict { (scalaInstance in doc).taskValue }
       }.value,

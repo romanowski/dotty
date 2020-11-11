@@ -49,7 +49,7 @@ object Lens {
     getter.unseal match {
       case Function(param :: Nil, Path(o, parts)) if o.symbol == param.symbol =>
         '{
-          val setter = (t: T) => (s: S) => ${ setterBody(('s).unseal, ('t).unseal, parts).seal.cast[S] }
+          val setter = (t: T) => (s: S) => ${ setterBody(('s).unseal, ('t).unseal, parts).asExprOf[S] }
           apply($getter)(setter)
         }
       case _ =>
@@ -88,8 +88,8 @@ object Iso {
     import qctx.reflect._
     import util._
 
-    val tpS = Type.of[S]
-    val tpA = Type.of[A]
+    val tpS = TypeRepr.of[S]
+    val tpA = TypeRepr.of[A]
 
     // 1. S must be a case class
     // 2. A must be a tuple
@@ -116,9 +116,9 @@ object Iso {
       '{???}
     } else '{
       // (p: S) => p._1
-      val to = (p: S) =>  ${ Select.unique(('p).unseal, "_1").seal.cast[A] }
+      val to = (p: S) =>  ${ Select.unique(('p).unseal, "_1").asExprOf[A] }
       // (p: A) => S(p)
-      val from = (p: A) =>  ${ Select.overloaded(Ident(companion), "apply", Nil, ('p).unseal :: Nil).seal.cast[S] }
+      val from = (p: A) =>  ${ Select.overloaded(Ident(companion), "apply", Nil, ('p).unseal :: Nil).asExprOf[S] }
       apply(from)(to)
     }
   }
@@ -127,10 +127,10 @@ object Iso {
     import qctx.reflect._
     import util._
 
-    val tpS = Type.of[S]
+    val tpS = TypeRepr.of[S]
 
     if (tpS.isSingleton) {
-      val ident = Ident(tpS.asInstanceOf[TermRef]).seal.cast[S]
+      val ident = Ident(tpS.asInstanceOf[TermRef]).asExprOf[S]
       '{
         Iso[S, 1](Function.const($ident))(Function.const(1))
       }
@@ -147,7 +147,7 @@ object Iso {
         case TypeRef(prefix, name) => TermRef(prefix, name)
       }
 
-      val obj = Select.overloaded(Ident(companion), "apply", Nil, Nil).seal.cast[S]
+      val obj = Select.overloaded(Ident(companion), "apply", Nil, Nil).asExprOf[S]
 
       '{
         Iso[S, 1](Function.const($obj))(Function.const(1))

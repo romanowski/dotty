@@ -814,7 +814,7 @@ object desugar {
     }
 
     flatTree(cdef1 :: companions ::: implicitWrappers ::: enumScaffolding)
-  }.reporting(i"desugared: $result", Printers.desugar)
+  }.showing(i"desugared: $result", Printers.desugar)
 
   /** Expand
    *
@@ -895,7 +895,7 @@ object desugar {
           mdef.tparams.head.srcPos)
       defDef(
         cpy.DefDef(mdef)(
-          name = normalizeName(mdef, ext).toExtensionName,
+          name = normalizeName(mdef, ext).asTermName,
           tparams = ext.tparams ++ mdef.tparams,
           vparamss = mdef.vparamss match
             case vparams1 :: vparamss1 if mdef.name.isRightAssocOperatorName =>
@@ -908,30 +908,35 @@ object desugar {
 
   /** Transforms
    *
-   *    <mods> type $T >: Low <: Hi
-   *
+   *    <mods> type t >: Low <: Hi
    *  to
    *
    *    @patternType <mods> type $T >: Low <: Hi
    *
-   *  if the type is a type splice.
+   *  if the type has a pattern variable name
    */
   def quotedPatternTypeDef(tree: TypeDef)(using Context): TypeDef = {
     assert(ctx.mode.is(Mode.QuotedPattern))
-    if (tree.name.startsWith("$") && !tree.isBackquoted) {
-      val patternBindHoleAnnot = New(ref(defn.InternalQuotedPatterns_patternTypeAnnot.typeRef)).withSpan(tree.span)
-      val mods = tree.mods.withAddedAnnotation(patternBindHoleAnnot)
+    if tree.name.isVarPattern && !tree.isBackquoted then
+      val patternTypeAnnot = New(ref(defn.InternalQuotedPatterns_patternTypeAnnot.typeRef)).withSpan(tree.span)
+      val mods = tree.mods.withAddedAnnotation(patternTypeAnnot)
       tree.withMods(mods)
-    }
+    else if tree.name.startsWith("$") && !tree.isBackquoted then
+      report.error(
+        """Quoted pattern variable names starting with $ are not suported anymore.
+          |Use lower cases type pattern name instead.
+          |""".stripMargin,
+        tree.srcPos)
+      tree
     else tree
   }
 
   /** The normalized name of `mdef`. This means
    *   1. Check that the name does not redefine a Scala core class.
-   *      If it does redefine, issue an error and return a mangled name instead of the original one.
-   *   2. Check that the name does not start with `extension_` unless the
-   *      method is an extension method.
-   *   3. If the name is missing (this can be the case for instance definitions), invent one instead.
+   *      If it does redefine, issue an error and return a mangled name instead
+   *      of the original one.
+   *   2. If the name is missing (this can be the case for instance definitions),
+   *      invent one instead.
    */
   def normalizeName(mdef: MemberDef, impl: Tree)(using Context): Name = {
     var name = mdef.name
@@ -942,31 +947,16 @@ object desugar {
       report.error(IllegalRedefinitionOfStandardKind(kind, name), errPos)
       name = name.errorName
     }
-    mdef match {
-      case vdef: ValDef if name.isExtension && isSetterNeeded(vdef)  =>
-        report.error(em"illegal setter name: `extension_=`", errPos)
-      case memDef if name.isExtensionName && !mdef.mods.is(ExtensionMethod) =>
-        report.error(em"illegal name: $name may not start with `extension_`", errPos)
-      case _ =>
-    }
     name
   }
 
-  /** Invent a name for an anonympus given or extension of type or template `impl`. */
+  /** Invent a name for an anonympus given of type or template `impl`. */
   def inventGivenOrExtensionName(impl: Tree)(using Context): SimpleName =
     val str = impl match
       case impl: Template =>
         if impl.parents.isEmpty then
-          impl.body.find {
-            case dd: DefDef if dd.mods.is(ExtensionMethod) => true
-            case _ => false
-          }
-          match
-            case Some(DefDef(name, _, (vparam :: _) :: _, _, _)) =>
-              s"extension_${name}_${inventTypeName(vparam.tpt)}"
-            case _ =>
-              report.error(AnonymousInstanceCannotBeEmpty(impl), impl.srcPos)
-              nme.ERROR.toString
+          report.error(AnonymousInstanceCannotBeEmpty(impl), impl.srcPos)
+          nme.ERROR.toString
         else
           impl.parents.map(inventTypeName(_)).mkString("given_", "_", "")
       case impl: Tree =>
@@ -1456,10 +1446,15 @@ object desugar {
 
       /** If `pat` is not an Identifier, a Typed(Ident, _), or a Bind, wrap
        *  it in a Bind with a fresh name. Return the transformed pattern, and the identifier
-       *  that refers to the bound variable for the pattern.
+       *  that refers to the bound variable for the pattern. Wildcard Binds are
+       *  also replaced by Binds with fresh names.
        */
       def makeIdPat(pat: Tree): (Tree, Ident) = pat match {
-        case Bind(name, _) => (pat, Ident(name))
+        case Bind(name, pat1) =>
+          if name == nme.WILDCARD then
+            val name = UniqueName.fresh()
+            (cpy.Bind(pat)(name, pat1), Ident(name))
+          else (pat, Ident(name))
         case id: Ident if isVarPattern(id) && id.name != nme.WILDCARD => (id, id)
         case Typed(id: Ident, _) if isVarPattern(id) && id.name != nme.WILDCARD => (pat, id)
         case _ =>

@@ -5,7 +5,7 @@ import java.security.MessageDigest
 import scala.io.Codec
 import Int.MaxValue
 import Names._, StdNames._, Contexts._, Symbols._, Flags._, NameKinds._, Types._
-import scala.internal.Chars.{isOperatorPart, digit2int}
+import util.Chars.{isOperatorPart, digit2int}
 import Definitions._
 import nme._
 import Decorators.concat
@@ -89,7 +89,7 @@ object NameOps {
             && (n != true_)
             && (n != null_))
         }
-      } || name.is(PatMatVarName)
+      } || name.is(PatMatGivenVarName)
 
     def isOpAssignmentName: Boolean = name match {
       case raw.NE | raw.LE | raw.GE | EMPTY =>
@@ -145,15 +145,9 @@ object NameOps {
       case name: SimpleName => name.startsWith("extension_")
       case _ => false
 
+    // TODO: Drop next 3 methods once extension names have stabilized
     /** Add an `extension_` in front of this name */
     def toExtensionName(using Context): SimpleName = "extension_".concat(name)
-
-    /** Drop `extension_` in front of this name, if it has this prefix */
-    def dropExtension = name match
-      case name: SimpleName if name.startsWith("extension_") =>
-        name.drop("extension_".length)
-      case _ =>
-        name
 
     /** The expanded name.
      *  This is the fully qualified name of `base` with `ExpandPrefixName` as separator,
@@ -175,6 +169,10 @@ object NameOps {
         case name => UniqueName.fresh(name)
       }
     }
+
+    /** Do two target names match? An empty target name matchws any other name. */
+    def matchesTargetName(other: Name) =
+      name == other || name.isEmpty || other.isEmpty
 
     private def functionSuffixStart: Int =
       val first = name.firstPart
@@ -218,7 +216,7 @@ object NameOps {
     /** Same as `funArity`, except that it returns -1 if the prefix
      *  is not one of "", "Context", "Erased", "ErasedContext"
      */
-    private def checkedFunArity(suffixStart: Int) =
+    private def checkedFunArity(suffixStart: Int): Int =
       if suffixStart == 0
          || isPreceded("Context", suffixStart)
          || isPreceded("Erased", suffixStart)

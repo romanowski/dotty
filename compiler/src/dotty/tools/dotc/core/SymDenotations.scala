@@ -325,6 +325,7 @@ object SymDenotations {
         case _ =>
           Nil
 
+      ensureCompleted()
       if rawParamss.isEmpty then recurWithoutParamss(info)
       else recurWithParamss(info, rawParamss)
     end paramSymss
@@ -339,6 +340,7 @@ object SymDenotations {
         case (fst :: Nil) :: _ => fst
         case _ => NoSymbol
       assert(isAllOf(ExtensionMethod))
+      ensureCompleted()
       leadParam(rawParamss)
 
     /** The denotation is completed: info is not a lazy type and attributes have defined values */
@@ -493,26 +495,40 @@ object SymDenotations {
     /** `fullName` where `.' is the separator character */
     def fullName(using Context): Name = fullNameSeparated(QualifiedName)
 
-    /** The name given in an `@alpha` annotation if one is present, `name` otherwise */
-    final def erasedName(using Context): Name =
-      val alphaAnnot =
-        if isAllOf(ModuleClass | Synthetic) then companionClass.getAnnotation(defn.AlphaAnnot)
-        else getAnnotation(defn.AlphaAnnot)
-      alphaAnnot match {
+    private var myTargetName: Name = null
+
+    private def computeTargetName(targetNameAnnot: Option[Annotation])(using Context): Name =
+      targetNameAnnot match
         case Some(ann) =>
-          ann.arguments match {
+          ann.arguments match
             case Literal(Constant(str: String)) :: Nil =>
-              if (isType)
-                if (is(ModuleClass))
-                  str.toTypeName.moduleClassName
-                else
-                  str.toTypeName
-              else
-                str.toTermName
+              if isType then
+                if is(ModuleClass) then str.toTypeName.moduleClassName
+                else str.toTypeName
+              else str.toTermName
             case _ => name
-          }
         case _ => name
-      }
+
+    def setTargetName(name: Name): Unit =
+      myTargetName = name
+
+    def hasTargetName(name: Name)(using Context): Boolean =
+      targetName.matchesTargetName(name)
+
+    /** The name given in a `@targetName` annotation if one is present, `name` otherwise */
+    def targetName(using Context): Name =
+      if myTargetName == null then
+        val carrier: SymDenotation =
+          if isAllOf(ModuleClass | Synthetic) then companionClass else this
+        val targetNameAnnot =
+          if carrier.isCompleting // annotations have been set already in this case
+          then carrier.unforcedAnnotation(defn.TargetNameAnnot)
+          else carrier.getAnnotation(defn.TargetNameAnnot)
+        myTargetName = computeTargetName(targetNameAnnot)
+        if name.is(SuperAccessorName) then
+          myTargetName = myTargetName.unmangle(List(ExpandedName, SuperAccessorName, ExpandPrefixName))
+
+      myTargetName
 
     // ----- Tests -------------------------------------------------
 
@@ -824,30 +840,25 @@ object SymDenotations {
       }
 
       /** Is protected access to target symbol permitted? */
-      def isProtectedAccessOK = {
-        def fail(str: => String): Boolean = {
-          if (whyNot != null) whyNot append str
+      def isProtectedAccessOK: Boolean =
+        inline def fail(str: String): false =
+          if whyNot != null then whyNot.append(str)
           false
-        }
         val cls = owner.enclosingSubClass
-        if (!cls.exists)
-          fail(
-            i"""
-               | Access to protected $this not permitted because enclosing ${ctx.owner.enclosingClass.showLocated}
+        if !cls.exists then
+          val encl = if ctx.owner.isConstructor then ctx.owner.enclosingClass.owner.enclosingClass else ctx.owner.enclosingClass
+          fail(i"""
+               | Access to protected $this not permitted because enclosing ${encl.showLocated}
                | is not a subclass of ${owner.showLocated} where target is defined""")
-        else if
-          !(  isType // allow accesses to types from arbitrary subclasses fixes #4737
-           || pre.derivesFrom(cls)
-           || isConstructor
-           || owner.is(ModuleClass) // don't perform this check for static members
-           )
-        then
-          fail(
-            i"""
+        else if isType || pre.derivesFrom(cls) || isConstructor || owner.is(ModuleClass) then
+          // allow accesses to types from arbitrary subclasses fixes #4737
+          // don't perform this check for static members
+          true
+        else
+          fail(i"""
                | Access to protected ${symbol.show} not permitted because prefix type ${pre.widen.show}
                | does not conform to ${cls.showLocated} where the access takes place""")
-        else true
-      }
+      end isProtectedAccessOK
 
       if pre eq NoPrefix then true
       else if isAbsent() then false
@@ -1098,11 +1109,9 @@ object SymDenotations {
     final def isEffectivelySealed(using Context): Boolean =
       isOneOf(FinalOrSealed) || isClass && !isOneOf(EffectivelyOpenFlags)
 
-    final def isSuperTrait(using Context): Boolean =
+    final def isMixinTrait(using Context): Boolean =
       isClass
-      && (is(SuperTrait)
-          || defn.assumedSuperTraits.contains(symbol.asClass)
-          || hasAnnotation(defn.SuperTraitAnnot))
+      && (hasAnnotation(defn.MixinAnnot) || defn.assumedMixinTraits.contains(symbol.asClass))
 
     /** The class containing this denotation which has the given effective name. */
     final def enclosingClassNamed(name: Name)(using Context): Symbol = {
@@ -1248,7 +1257,7 @@ object SymDenotations {
     final def matchingDecl(inClass: Symbol, site: Type)(using Context): Symbol = {
       var denot = inClass.info.nonPrivateDecl(name)
       if (denot.isTerm) // types of the same name always match
-        denot = denot.matchingDenotation(site, site.memberInfo(symbol))
+        denot = denot.matchingDenotation(site, site.memberInfo(symbol), symbol.targetName)
       denot.symbol
     }
 
@@ -1257,7 +1266,7 @@ object SymDenotations {
     final def matchingMember(site: Type)(using Context): Symbol = {
       var denot = site.nonPrivateMember(name)
       if (denot.isTerm) // types of the same name always match
-        denot = denot.matchingDenotation(site, site.memberInfo(symbol))
+        denot = denot.matchingDenotation(site, site.memberInfo(symbol), symbol.targetName)
       denot.symbol
     }
 
@@ -2328,6 +2337,7 @@ object SymDenotations {
     override def mapInfo(f: Type => Type)(using Context): SingleDenotation = this
 
     override def matches(other: SingleDenotation)(using Context): Boolean = false
+    override def targetName(using Context): Name = EmptyTermName
     override def mapInherited(ownDenots: PreDenotation, prevDenots: PreDenotation, pre: Type)(using Context): SingleDenotation = this
     override def filterWithPredicate(p: SingleDenotation => Boolean): SingleDenotation = this
     override def filterDisjoint(denots: PreDenotation)(using Context): SingleDenotation = this

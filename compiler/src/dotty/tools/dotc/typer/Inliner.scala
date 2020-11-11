@@ -17,6 +17,7 @@ import Contexts._
 import Names.{Name, TermName}
 import NameKinds.{InlineAccessorName, InlineBinderName, InlineScrutineeName, BodyRetainerName}
 import ProtoTypes.selectionProto
+import Annotations.Annotation
 import SymDenotations.SymDenotation
 import Inferencing.isFullyDefined
 import config.Printers.inlining
@@ -198,12 +199,13 @@ object Inliner {
       name = BodyRetainerName(meth.name),
       flags = meth.flags &~ (Inline | Macro | Override) | Private,
       coord = mdef.rhs.span.startPos).asTerm
+    retainer.deriveTargetNameAnnotation(meth, name => BodyRetainerName(name.asTermName))
     polyDefDef(retainer, targs => prefss =>
       inlineCall(
         ref(meth).appliedToTypes(targs).appliedToArgss(prefss)
           .withSpan(mdef.rhs.span.startPos))(
         using ctx.withOwner(retainer)))
-    .reporting(i"retainer for $meth: $result", inlining)
+    .showing(i"retainer for $meth: $result", inlining)
 
   /** Replace `Inlined` node by a block that contains its bindings and expansion */
   def dropInlined(inlined: Inlined)(using Context): Tree =
@@ -853,7 +855,7 @@ class Inliner(call: tpd.Tree, rhsToInline: tpd.Tree)(using Context) {
           if (idx >= 0 && idx < args.length) {
             def finish(arg: Tree) =
               new TreeTypeMap().transform(arg) // make sure local bindings in argument have fresh symbols
-                .reporting(i"projecting $tree -> $result", inlining)
+                .showing(i"projecting $tree -> $result", inlining)
             val arg = args(idx)
             if (precomputed)
               if (isElideableExpr(arg)) finish(arg)
@@ -1235,9 +1237,8 @@ class Inliner(call: tpd.Tree, rhsToInline: tpd.Tree)(using Context) {
           else Block(cond1 :: Nil, selected)
         case cond1 =>
           if (tree.isInline)
-            errorTree(tree, em"""cannot reduce inline if
-                                | its condition   ${tree.cond}
-                                | is not a constant value""")
+            errorTree(tree,
+              em"Cannot reduce `inline if` because its condition is not a constant value: $cond1")
           else
             cond1.computeNullableDeeply()
             val if1 = untpd.cpy.If(tree)(cond = untpd.TypedSplice(cond1))
@@ -1474,10 +1475,15 @@ class Inliner(call: tpd.Tree, rhsToInline: tpd.Tree)(using Context) {
     }.apply(Nil, tree)
 
   object ConstantValue {
-    def unapply(tree: Tree)(using Context): Option[Any] = tree.tpe.widenTermRefExpr.normalized match {
-      case ConstantType(Constant(x)) => Some(x)
-      case _ => None
-    }
+    def unapply(tree: Tree)(using Context): Option[Any] =
+      tree match
+        case Typed(expr, _) => unapply(expr)
+        case Inlined(_, Nil, expr) => unapply(expr)
+        case Block(Nil, expr) => unapply(expr)
+        case _ =>
+          tree.tpe.widenTermRefExpr.normalized match
+            case ConstantType(Constant(x)) => Some(x)
+            case _ => None
   }
 
 }

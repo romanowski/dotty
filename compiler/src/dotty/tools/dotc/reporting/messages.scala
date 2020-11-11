@@ -822,14 +822,16 @@ import transform.SymUtils._
            |"""
   }
 
-  class PatternMatchExhaustivity(uncoveredFn: => String)(using Context)
+  class PatternMatchExhaustivity(uncoveredFn: => String, hasMore: Boolean)(using Context)
   extends Message(PatternMatchExhaustivityID) {
     def kind = "Pattern Match Exhaustivity"
     lazy val uncovered = uncoveredFn
     def msg =
+      val addendum = if hasMore then "(More unmatched cases are elided)" else ""
       em"""|${hl("match")} may not be exhaustive.
            |
-           |It would fail on pattern case: $uncovered"""
+           |It would fail on pattern case: $uncovered
+           |$addendum"""
 
 
     def explain =
@@ -1082,7 +1084,12 @@ import transform.SymUtils._
 
   class OverridesNothingButNameExists(member: Symbol, existing: List[Denotations.SingleDenotation])(using Context)
   extends DeclarationMsg(OverridesNothingButNameExistsID) {
-    def msg = em"""${member} has a different signature than the overridden declaration"""
+    def msg =
+      val what =
+        if !existing.exists(_.symbol.hasTargetName(member.targetName))
+        then "target name"
+        else "signature"
+      em"""${member} has a different $what than the overridden declaration"""
     def explain =
       val existingDecl: String = existing.map(_.showDcl).mkString("  \n")
       em"""|There must be a non-final field or method with the name ${member.name} and the
@@ -2072,7 +2079,16 @@ import transform.SymUtils._
             case MethodNotAMethodMatch =>
               "neither has parameters."
             case FullMatch =>
-              i"have the same$nameAnd type after erasure."
+              val hint =
+                if !decl.hasAnnotation(defn.TargetNameAnnot)
+                   && !previousDecl.hasAnnotation(defn.TargetNameAnnot)
+                then
+                  i"""
+                     |
+                     |Consider adding a @targetName annotation to one of the conflicting definitions
+                     |for disambiguation."""
+                else ""
+              i"have the same$nameAnd type after erasure.$hint"
           }
         }
         else ""
@@ -2197,7 +2213,7 @@ import transform.SymUtils._
     def explain = ""
   }
 
-  class IllegalSuperAccessor(base: Symbol, memberName: Name,
+  class IllegalSuperAccessor(base: Symbol, memberName: Name, targetName: Name,
       acc: Symbol, accTp: Type,
       other: Symbol, otherTp: Type)(using Context) extends DeclarationMsg(IllegalSuperAccessorID) {
     def msg = {
@@ -2213,7 +2229,8 @@ import transform.SymUtils._
       // does in classes, i.e. followed the linearization of the trait itself.
       val staticSuperCall = {
         val staticSuper = accMixin.asClass.info.parents.reverse
-          .find(_.nonPrivateMember(memberName).matchingDenotation(accMixin.thisType, acc.info).exists)
+          .find(_.nonPrivateMember(memberName)
+            .matchingDenotation(accMixin.thisType, acc.info, targetName).exists)
         val staticSuperName = staticSuper match {
           case Some(parent) =>
             parent.classSymbol.name.show
@@ -2445,8 +2462,8 @@ import transform.SymUtils._
 
   class InvalidReferenceInImplicitNotFoundAnnotation(typeVar: String, owner: String)(using Context)
     extends ReferenceMsg(InvalidReferenceInImplicitNotFoundAnnotationID) {
-    def msg = em"""|Invalid reference to a type variable "${hl(typeVar)}" found in the annotation argument.
-                   |The variable does not occur in the signature of ${hl(owner)}.
+    def msg = em"""|Invalid reference to a type variable ${hl(typeVar)} found in the annotation argument.
+                   |The variable does not occur as a parameter in the scope of ${hl(owner)}.
                    |""".stripMargin
     def explain = ""
   }

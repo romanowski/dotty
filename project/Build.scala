@@ -53,9 +53,9 @@ object MyScalaJSPlugin extends AutoPlugin {
 }
 
 object Build {
-  val referenceVersion = "3.0.0-M1-bin-20201021-97da3cb-NIGHTLY"
+  val referenceVersion = "3.0.0-M2-bin-20201108-3938388-NIGHTLY"
 
-  val baseVersion = "3.0.0-M1"
+  val baseVersion = "3.0.0-M2"
   val baseSbtDottyVersion = "0.4.5"
 
   // Versions used by the vscode extension to create a new project
@@ -63,7 +63,7 @@ object Build {
   // TODO: Have the vscode extension fetch these numbers from the Internet
   // instead of hardcoding them ?
   val publishedDottyVersion = referenceVersion
-  val publishedSbtDottyVersion = "0.4.4"
+  val publishedSbtDottyVersion = "0.4.5"
 
   /** scala-library version required to compile Dotty.
    *
@@ -213,6 +213,12 @@ object Build {
     }
   )
 
+  lazy val disableDocSetting =
+    // Disable scaladoc generation, it's way too slow and we'll replace it
+    // by dottydoc anyway. We still publish an empty -javadoc.jar to make
+    // sonatype happy.
+      sources in (Compile, doc) := Seq()
+
   lazy val commonSettings = publishSettings ++ Seq(
     scalaSource       in Compile    := baseDirectory.value / "src",
     scalaSource       in Test       := baseDirectory.value / "test",
@@ -220,11 +226,6 @@ object Build {
     javaSource        in Test       := baseDirectory.value / "test",
     resourceDirectory in Compile    := baseDirectory.value / "resources",
     resourceDirectory in Test       := baseDirectory.value / "test-resources",
-
-    // Disable scaladoc generation, it's way too slow and we'll replace it
-    // by dottydoc anyway. We still publish an empty -javadoc.jar to make
-    // sonatype happy.
-    sources in (Compile, doc) := Seq(),
 
     // Prevent sbt from rewriting our dependencies
     scalaModuleInfo ~= (_.map(_.withOverrideScalaVersion(false))),
@@ -244,7 +245,8 @@ object Build {
     crossPaths := false,
     // Do not depend on the Scala library
     autoScalaLibrary := false,
-    excludeFromIDE := true
+    excludeFromIDE := true,
+    disableDocSetting
   )
 
   // Settings used when compiling dotty (both non-bootstrapped and bootstrapped)
@@ -258,6 +260,8 @@ object Build {
     moduleName ~= { _.stripSuffix("-scala2") },
     version := dottyVersion,
     target := baseDirectory.value / ".." / "out" / "scala-2" / name.value,
+
+    disableDocSetting
   )
 
   // Settings used when compiling dotty with the reference compiler
@@ -267,6 +271,8 @@ object Build {
     version := dottyNonBootstrappedVersion,
     scalaVersion := referenceVersion,
     excludeFromIDE := true,
+
+    disableDocSetting
   )
 
   // Settings used when compiling dotty with a non-bootstrapped dotty
@@ -328,6 +334,8 @@ object Build {
     },
     // sbt-dotty defines `scalaInstance in doc` so we need to override it manually
     scalaInstance in doc := scalaInstance.value,
+
+    disableDocSetting,
   )
 
   lazy val commonBenchmarkSettings = Seq(
@@ -1101,7 +1109,6 @@ object Build {
           ++ (dir / "shared/src/test/require-jdk7" ** "*.scala").get
 
           ++ (dir / "js/src/test/scala" ** (("*.scala": FileFilter)
-            -- "ExportsTest.scala" // JS exports + IR checking error
             -- "ObjectTest.scala" // compile errors caused by #9588
             -- "StackTraceTest.scala" // would require `npm install source-map-support`
             -- "UnionTypeTest.scala" // requires the Scala 2 macro defined in Typechecking*.scala
@@ -1118,6 +1125,7 @@ object Build {
       Test / testOptions += Tests.Filter { name =>
         !Set[String](
           "org.scalajs.testsuite.jsinterop.AsyncTest", // needs JS exports in PromiseMock.scala
+          "org.scalajs.testsuite.jsinterop.ExportsTest", // JS exports
           "org.scalajs.testsuite.jsinterop.JSExportStaticTest", // JS exports
 
           // Not investigated so far
@@ -1152,6 +1160,14 @@ object Build {
   lazy val `scala3-bench` = project.in(file("bench")).asDottyBench(NonBootstrapped)
   lazy val `scala3-bench-bootstrapped` = project.in(file("bench")).asDottyBench(Bootstrapped)
   lazy val `scala3-bench-run` = project.in(file("bench-run")).asDottyBench(Bootstrapped)
+
+  val testcasesOutputDir = taskKey[String]("Root directory where tests classses are generated")
+  val testcasesSourceRoot = taskKey[String]("Root directory where tests sources are generated")
+  val generateSelfDocumentation = taskKey[Unit]("Generate example documentation")
+  val generateScala3Documentation = taskKey[Unit]("Generate documentation for dotty lib")
+  val generateTestcasesDocumentation  = taskKey[Unit]("Generate documentation for testcases, usefull for debugging tests")
+  lazy val `scala3doc` = project.in(file("scala3doc")).asScala3doc
+  lazy val `scala3doc-testcases` = project.in(file("scala3doc-testcases")).asScala3docTestcases
 
   // sbt plugin to use Dotty in your own build, see
   // https://github.com/lampepfl/scala3-example-project for usage.
@@ -1192,6 +1208,7 @@ object Build {
         publishLocal in `scala3-staging`,
         publishLocal in `scala3-tasty-inspector`,
         publishLocal in `scala3-doc-bootstrapped`,
+        publishLocal in `scala3doc`,
         publishLocal in `scala3-bootstrapped` // Needed because sbt currently hardcodes the dotty artifact
       ).evaluated
     )
@@ -1393,7 +1410,7 @@ object Build {
     def asDottyRoot(implicit mode: Mode): Project = project.withCommonSettings.
       aggregate(`scala3-interfaces`, dottyLibrary, dottyCompiler, tastyCore, dottyDoc, `scala3-sbt-bridge`).
       bootstrappedAggregate(`scala3-language-server`, `scala3-staging`, `scala3-tasty-inspector`,
-        `scala3-library-bootstrappedJS`).
+        `scala3-library-bootstrappedJS`, scala3doc).
       dependsOn(tastyCore).
       dependsOn(dottyCompiler).
       dependsOn(dottyLibrary).
@@ -1439,6 +1456,76 @@ object Build {
       dependsOn(dottyCompiler).
       settings(commonBenchmarkSettings).
       enablePlugins(JmhPlugin)
+
+    def asScala3doc: Project = {
+      def generateDocumentation(targets: String, name: String, outDir: String, params: String = "") = Def.taskDyn {
+          val sourceMapping = "=https://github.com/lampepfl/dotty/tree/master#L"
+          run.in(Compile).toTask(s""" -d output/$outDir -t $targets -n "$name" -s $sourceMapping $params""")
+      }
+
+      def joinProducts(products: Seq[java.io.File]): String =
+        products.iterator.map(_.getAbsolutePath.toString).mkString(java.io.File.pathSeparator)
+
+      val dokkaVersion = "1.4.10.2"
+
+      project.settings(commonBootstrappedSettings).
+        dependsOn(`scala3-compiler-bootstrapped`).
+        dependsOn(`scala3-tasty-inspector`).
+        settings(
+          // Needed to download dokka and its dependencies
+          resolvers += Resolver.jcenterRepo,
+          libraryDependencies ++= Seq(
+            "org.jetbrains.dokka" % "dokka-core" % dokkaVersion,
+            "org.jetbrains.dokka" % "dokka-base" % dokkaVersion,
+            "org.jetbrains.kotlinx" % "kotlinx-html-jvm" % "0.7.2", // Needs update when dokka version changes
+            "com.vladsch.flexmark" % "flexmark-all" % "0.42.12",
+            "nl.big-o" % "liqp" % "0.6.7",
+            "args4j" % "args4j" % "2.33",
+            Dependencies.`jackson-dataformat-yaml`,
+
+            "org.jetbrains.dokka" % "dokka-test-api" % dokkaVersion % "test",
+            "com.novocode" % "junit-interface" % "0.11" % "test",
+          ),
+          Test / test := (Test / test).dependsOn(compile.in(Compile).in(`scala3doc-testcases`)).value,
+          testcasesOutputDir.in(Test) := joinProducts((`scala3doc-testcases`/Compile/products).value),
+          testcasesSourceRoot.in(Test) := (baseDirectory.in(`scala3doc-testcases`).value / "src").getAbsolutePath.toString,
+          Compile / mainClass := Some("dotty.dokka.Main"),
+          // There is a bug in dokka that prevents parallel tests withing the same jvm
+          fork.in(test) := true,
+          generateSelfDocumentation := Def.taskDyn {
+            generateDocumentation(classDirectory.in(Compile).value.getAbsolutePath, "scala3doc", "self", "-p documentation")
+          }.value,
+          generateScala3Documentation := Def.taskDyn {
+            val dottyJars: Seq[java.io.File] = Seq(
+              (`scala3-interfaces`/Compile/products).value,
+              (`tasty-core`/Compile/products).value,
+              (`scala3-library`/Compile/products).value,
+              // TODO we can't load stdlib from Tasty
+              // (`stdlib-bootstrapped`/Compile/products).value,
+            ).flatten
+
+            val roots = joinProducts(dottyJars)
+
+            if (dottyJars.isEmpty) Def.task { streams.value.log.error("Dotty lib wasn't found") }
+            else generateDocumentation(roots, "Scala 3", "scala3", "-p scala3-docs")
+          }.value,
+          generateTestcasesDocumentation := Def.taskDyn {
+            generateDocumentation(Build.testcasesOutputDir.in(Test).value, "Scala3doc testcases", "testcases")
+          }.value,
+          buildInfoKeys in Test := Seq[BuildInfoKey](
+            Build.testcasesOutputDir.in(Test),
+            Build.testcasesSourceRoot.in(Test),
+          ),
+          buildInfoPackage in Test := "dotty.dokka",
+          BuildInfoPlugin.buildInfoScopedSettings(Test),
+          BuildInfoPlugin.buildInfoDefaultSettings,
+          // Uncomment to debug dokka processing (require to run debug in listen mode on 5005 port)
+          // javaOptions.in(run) += "-agentlib:jdwp=transport=dt_socket,server=n,address=localhost:5005,suspend=y"
+        )
+    }
+
+    def asScala3docTestcases: Project =
+      project.dependsOn(`scala3-compiler-bootstrapped`).settings(commonBootstrappedSettings)
 
     def asDist(implicit mode: Mode): Project = project.
       enablePlugins(PackPlugin).

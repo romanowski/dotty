@@ -229,7 +229,6 @@ class Definitions {
     @tu lazy val Compiletime_requireConst: Symbol = CompiletimePackageObject.requiredMethod("requireConst")
     @tu lazy val Compiletime_constValue   : Symbol = CompiletimePackageObject.requiredMethod("constValue")
     @tu lazy val Compiletime_constValueOpt: Symbol = CompiletimePackageObject.requiredMethod("constValueOpt")
-    @tu lazy val Compiletime_code         : Symbol = CompiletimePackageObject.requiredMethod("extension_code")
     @tu lazy val Compiletime_summonFrom   : Symbol = CompiletimePackageObject.requiredMethod("summonFrom")
   @tu lazy val CompiletimeTestingPackageObject: Symbol = requiredModule("scala.compiletime.testing.package")
     @tu lazy val CompiletimeTesting_typeChecks: Symbol = CompiletimeTestingPackageObject.requiredMethod("typeChecks")
@@ -440,7 +439,7 @@ class Definitions {
   def AnyKindType: TypeRef = AnyKindClass.typeRef
 
   @tu lazy val andType: TypeSymbol = enterBinaryAlias(tpnme.AND, AndType(_, _))
-  @tu lazy val orType: TypeSymbol = enterBinaryAlias(tpnme.OR, OrType(_, _))
+  @tu lazy val orType: TypeSymbol = enterBinaryAlias(tpnme.OR, OrType(_, _, soft = false))
 
   /** Marker method to indicate an argument to a call-by-name parameter.
    *  Created by byNameClosures and elimByName, eliminated by Erasure,
@@ -747,7 +746,7 @@ class Definitions {
     @tu lazy val PartialFunction_applyOrElse: Symbol = PartialFunctionClass.requiredMethod(nme.applyOrElse)
 
   @tu lazy val AbstractPartialFunctionClass: ClassSymbol = requiredClass("scala.runtime.AbstractPartialFunction")
-  @tu lazy val FunctionXXLClass: ClassSymbol = requiredClass("scala.FunctionXXL")
+  @tu lazy val FunctionXXLClass: ClassSymbol = requiredClass("scala.runtime.FunctionXXL")
   @tu lazy val ScalaSymbolClass: ClassSymbol = requiredClass("scala.Symbol")
   @tu lazy val DynamicClass: ClassSymbol = requiredClass("scala.Dynamic")
   @tu lazy val OptionClass: ClassSymbol = requiredClass("scala.Option")
@@ -796,6 +795,11 @@ class Definitions {
   @tu lazy val QuotedExprModule: Symbol = QuotedExprClass.companionModule
 
   @tu lazy val QuoteContextClass: ClassSymbol = requiredClass("scala.quoted.QuoteContext")
+  @tu lazy val QuoteContextInternalClass: ClassSymbol = requiredClass("scala.internal.quoted.QuoteContextInternal")
+    @tu lazy val QuoteContextInternal_unpickleExpr: Symbol = QuoteContextInternalClass.requiredMethod("unpickleExpr")
+    @tu lazy val QuoteContextInternal_unpickleType: Symbol = QuoteContextInternalClass.requiredMethod("unpickleType")
+    @tu lazy val QuoteContextInternal_ExprMatch: Symbol = QuoteContextInternalClass.requiredMethod("ExprMatch")
+    @tu lazy val QuoteContextInternal_TypeMatch: Symbol = QuoteContextInternalClass.requiredMethod("TypeMatch")
 
   @tu lazy val LiftableModule: Symbol = requiredModule("scala.quoted.Liftable")
     @tu lazy val LiftableModule_BooleanLiftable: Symbol = LiftableModule.requiredMethod("BooleanLiftable")
@@ -821,25 +825,13 @@ class Definitions {
     @tu lazy val InternalQuotedPatterns_patternTypeAnnot: ClassSymbol = InternalQuotedPatterns.requiredClass("patternType")
     @tu lazy val InternalQuotedPatterns_fromAboveAnnot: ClassSymbol = InternalQuotedPatterns.requiredClass("fromAbove")
 
-  @tu lazy val InternalQuotedExprModule: Symbol = requiredModule("scala.internal.quoted.Expr")
-    @tu lazy val InternalQuotedExpr_unapply: Symbol = InternalQuotedExprModule.requiredMethod(nme.unapply)
-    @tu lazy val InternalQuotedExpr_null: Symbol = InternalQuotedExprModule.requiredMethod(nme.null_)
-    @tu lazy val InternalQuotedExpr_unit: Symbol = InternalQuotedExprModule.requiredMethod(nme.Unit)
-
-  @tu lazy val InternalQuotedTypeModule: Symbol = requiredModule("scala.internal.quoted.Type")
-    @tu lazy val InternalQuotedType_unapply: Symbol = InternalQuotedTypeModule.requiredMethod(nme.unapply)
-
   @tu lazy val QuotedTypeClass: ClassSymbol = requiredClass("scala.quoted.Type")
-    @tu lazy val QuotedType_splice: Symbol = QuotedTypeClass.requiredType(tpnme.spliceType)
+    @tu lazy val QuotedType_splice: Symbol = QuotedTypeClass.requiredType(tpnme.Underlying)
 
   @tu lazy val QuotedTypeModule: Symbol = QuotedTypeClass.companionModule
     @tu lazy val QuotedTypeModule_apply: Symbol = QuotedTypeModule.requiredMethod("apply")
 
   @tu lazy val TastyReflectionClass: ClassSymbol = requiredClass("scala.tasty.Reflection")
-
-  @tu lazy val PickledQuote_make: Symbol = requiredMethod("scala.internal.quoted.PickledQuote.make")
-  @tu lazy val PickledQuote_unpickleExpr: Symbol = requiredMethod("scala.internal.quoted.PickledQuote.unpickleExpr")
-  @tu lazy val PickledQuote_unpickleType: Symbol = requiredMethod("scala.internal.quoted.PickledQuote.unpickleType")
 
   @tu lazy val EqlClass: ClassSymbol = requiredClass("scala.Eql")
     def Eql_eqlAny(using Context): TermSymbol = EqlClass.companionModule.requiredMethod(nme.eqlAny)
@@ -895,12 +887,9 @@ class Definitions {
     lazy val RuntimeTuple_isInstanceOfEmptyTuple: Symbol = RuntimeTupleModule.requiredMethod("isInstanceOfEmptyTuple")
     lazy val RuntimeTuple_isInstanceOfNonEmptyTuple: Symbol = RuntimeTupleModule.requiredMethod("isInstanceOfNonEmptyTuple")
 
-  @tu lazy val TupledFunctionTypeRef: TypeRef = requiredClassRef("scala.TupledFunction")
+  @tu lazy val TupledFunctionTypeRef: TypeRef = requiredClassRef("scala.util.TupledFunction")
   def TupledFunctionClass(using Context): ClassSymbol = TupledFunctionTypeRef.symbol.asClass
-
-  @tu lazy val InternalTupledFunctionTypeRef: TypeRef = requiredClassRef("scala.internal.TupledFunction")
-  def InternalTupleFunctionClass(using Context): ClassSymbol = InternalTupledFunctionTypeRef.symbol.asClass
-  def InternalTupleFunctionModule(using Context): Symbol = requiredModule("scala.internal.TupledFunction")
+  def RuntimeTupleFunctionsModule(using Context): Symbol = requiredModule("scala.runtime.TupledFunctions")
 
   // Annotation base classes
   @tu lazy val AnnotationClass: ClassSymbol = requiredClass("scala.annotation.Annotation")
@@ -920,6 +909,7 @@ class Definitions {
   @tu lazy val InvariantBetweenAnnot: ClassSymbol = requiredClass("scala.annotation.internal.InvariantBetween")
   @tu lazy val MainAnnot: ClassSymbol = requiredClass("scala.main")
   @tu lazy val MigrationAnnot: ClassSymbol = requiredClass("scala.annotation.migration")
+  @tu lazy val MixinAnnot: ClassSymbol = requiredClass("scala.annotation.mixin")
   @tu lazy val NativeAnnot: ClassSymbol = requiredClass("scala.native")
   @tu lazy val RepeatedAnnot: ClassSymbol = requiredClass("scala.annotation.internal.Repeated")
   @tu lazy val SourceFileAnnot: ClassSymbol = requiredClass("scala.annotation.internal.SourceFile")
@@ -928,7 +918,6 @@ class Definitions {
   @tu lazy val ScalaStrictFPAnnot: ClassSymbol = requiredClass("scala.annotation.strictfp")
   @tu lazy val ScalaStaticAnnot: ClassSymbol = requiredClass("scala.annotation.static")
   @tu lazy val SerialVersionUIDAnnot: ClassSymbol = requiredClass("scala.SerialVersionUID")
-  @tu lazy val SuperTraitAnnot: ClassSymbol = requiredClass("scala.annotation.superTrait")
   @tu lazy val TASTYSignatureAnnot: ClassSymbol = requiredClass("scala.annotation.internal.TASTYSignature")
   @tu lazy val TASTYLongSignatureAnnot: ClassSymbol = requiredClass("scala.annotation.internal.TASTYLongSignature")
   @tu lazy val TailrecAnnot: ClassSymbol = requiredClass("scala.annotation.tailrec")
@@ -948,7 +937,7 @@ class Definitions {
   @tu lazy val ShowAsInfixAnnot: ClassSymbol = requiredClass("scala.annotation.showAsInfix")
   @tu lazy val FunctionalInterfaceAnnot: ClassSymbol = requiredClass("java.lang.FunctionalInterface")
   @tu lazy val InfixAnnot: ClassSymbol = requiredClass("scala.annotation.infix")
-  @tu lazy val AlphaAnnot: ClassSymbol = requiredClass("scala.annotation.alpha")
+  @tu lazy val TargetNameAnnot: ClassSymbol = requiredClass("scala.annotation.targetName")
   @tu lazy val VarargsAnnot: ClassSymbol = requiredClass("scala.annotation.varargs")
 
   // A list of annotations that are commonly used to indicate that a field/method argument or return
@@ -1517,7 +1506,7 @@ class Definitions {
   def isInfix(sym: Symbol)(using Context): Boolean =
     (sym eq Object_eq) || (sym eq Object_ne)
 
-  @tu lazy val assumedSuperTraits =
+  @tu lazy val assumedMixinTraits =
     Set(ComparableClass, ProductClass, SerializableClass,
       // add these for now, until we had a chance to retrofit 2.13 stdlib
       // we should do a more through sweep through it then.

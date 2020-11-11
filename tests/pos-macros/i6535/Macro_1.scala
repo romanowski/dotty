@@ -7,6 +7,7 @@ object scalatest {
   def assertImpl(cond: Expr[Boolean])(using qctx: QuoteContext) : Expr[Unit] = {
     import qctx.reflect._
     import util._
+    import ValDef.let
 
     cond.unseal.underlyingArgument match {
       case t @ Apply(Select(lhs, op), rhs :: Nil) =>
@@ -16,12 +17,12 @@ object scalatest {
             let(app) { result =>
               val l = left.seal
               val r = right.seal
-              val b = result.seal.cast[Boolean]
+              val b = result.asExprOf[Boolean]
               val code = '{ scala.Predef.assert($b) }
               code.unseal
             }
           }
-        }.seal.cast[Unit]
+        }.asExprOf[Unit]
     }
   }
 

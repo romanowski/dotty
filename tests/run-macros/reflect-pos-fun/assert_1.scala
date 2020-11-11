@@ -10,13 +10,13 @@ object scalatest {
 
     cond.unseal.underlyingArgument match {
       case t @ Apply(TypeApply(Select(lhs, op), targs), rhs) =>
-        let(lhs) { left =>
-          lets(rhs) { rs =>
+        ValDef.let(lhs) { left =>
+          ValDef.let(rhs) { rs =>
             val app = Select.overloaded(left, op, targs.map(_.tpe), rs)
-            val b = app.seal.cast[Boolean]
+            val b = app.asExprOf[Boolean]
             '{ scala.Predef.assert($b) }.unseal
           }
-        }.seal.cast[Unit]
+        }.asExprOf[Unit]
     }
   }
 }
