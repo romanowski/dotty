@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - master
+      - scala3doc/generate-dotty-website-test
   pull_request_target:
 jobs:
   build:
@@ -77,3 +78,37 @@ jobs:
             echo uplading docs to https://scala3doc.virtuslab.com/$DOC_DEST
             az storage container create --name $DOC_DEST --account-name scala3docstorage --public-access container
             az storage blob sync -s scala3doc/output -c $DOC_DEST --account-name scala3docstorage
+  
+  release_documentation:
+    runs-on: [ubuntu-latest]
+
+    env:
+      RELEASEBUILD: yes
+      BOT_TOKEN: ${{ secrets.BOT_TOKEN }}  # If you need to change this:
+                                           # Generate one at https://github.com/settings/tokens
+                                           # Make sure you have the write permissions to the repo: https://github.com/lampepfl/dotty-website
+
+    steps:
+      - name: Checkout cleanup script
+        uses: actions/checkout@v2
+
+      - name: Cleanup
+        run: .github/workflows/cleanup.sh
+
+      - name: Git Checkout
+        uses: actions/checkout@v2
+
+      # - name: Add SBT proxy repositories
+      #   run: cp -vf .github/workflows/repositories /root/.sbt/ ; true
+
+      - name: Generate Website using scala3doc
+        run: |
+          ./project/scripts/genDocs -doc-snapshot
+
+      - name: Deploy Website
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          personal_token: ${{ secrets.BOT_TOKEN }}
+          publish_dir: docs/_site
+          external_repository: romanowski/dotty-website
+          publish_branch: gh-pages
