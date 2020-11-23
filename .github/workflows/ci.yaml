@@ -270,8 +270,8 @@ jobs:
         - ${{ github.workspace }}/../../cache/sbt:/root/.sbt
         - ${{ github.workspace }}/../../cache/ivy:/root/.ivy2/cache
         - ${{ github.workspace }}/../../cache/general:/root/.cache
-    needs: [publish_nightly]
-    if: github.event_name == 'schedule'
+    # needs: [publish_nightly]
+    # if: github.event_name == 'schedule'
     env:
       NIGHTLYBUILD: yes
       BOT_TOKEN: ${{ secrets.BOT_TOKEN }}  # If you need to change this:
