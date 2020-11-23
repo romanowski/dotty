@@ -263,15 +263,15 @@ jobs:
           ./project/scripts/sbtPublish ";project scala3-bootstrapped ;publishSigned ;sonatypeBundleRelease"
 
   nightly_documentation:
-    runs-on: [self-hosted, Linux]
-    container:
-      image: lampepfl/dotty:2020-09-08
-      volumes:
-        - ${{ github.workspace }}/../../cache/sbt:/root/.sbt
-        - ${{ github.workspace }}/../../cache/ivy:/root/.ivy2/cache
-        - ${{ github.workspace }}/../../cache/general:/root/.cache
-    needs: [publish_nightly]
-    if: github.event_name == 'schedule'
+    runs-on: [ubuntu-latest]
+    # container:
+    #   image: lampepfl/dotty:2020-09-08
+    #   volumes:
+    #     - ${{ github.workspace }}/../../cache/sbt:/root/.sbt
+    #     - ${{ github.workspace }}/../../cache/ivy:/root/.ivy2/cache
+    #     - ${{ github.workspace }}/../../cache/general:/root/.cache
+    # needs: [publish_nightly]
+    # if: github.event_name == 'schedule'
     env:
       NIGHTLYBUILD: yes
       BOT_TOKEN: ${{ secrets.BOT_TOKEN }}  # If you need to change this:
@@ -288,8 +288,8 @@ jobs:
       - name: Git Checkout
         uses: actions/checkout@v2
 
-      - name: Add SBT proxy repositories
-        run: cp -vf .github/workflows/repositories /root/.sbt/ ; true
+    #  - name: Add SBT proxy repositories
+    #    run: cp -vf .github/workflows/repositories /root/.sbt/ ; true
 
       - name: Generate Website
         run: |
