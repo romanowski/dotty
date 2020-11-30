@@ -1302,6 +1302,7 @@ object Build {
         (publishLocal in `tasty-core-bootstrapped`).value
         (publishLocal in `scala3-library-bootstrapped`).value
         (publishLocal in `scala3-doc-bootstrapped`).value
+        (publishLocal in `scala3-tasty-inspector`).value
         (publishLocal in `scala3doc`).value
         (publishLocal in `scala3-compiler-bootstrapped`).value
         (publishLocal in `sbt-dotty`).value
