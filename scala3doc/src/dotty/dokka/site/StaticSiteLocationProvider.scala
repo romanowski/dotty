@@ -16,13 +16,13 @@ import java.nio.file.Path
 class StaticSiteLocationProviderFactory(private val ctx: DokkaContext) extends LocationProviderFactory:
   override def getLocationProvider(pageNode: RootPageNode): LocationProvider =
     try new StaticSiteLocationProvider(ctx, pageNode)
-    catch 
+    catch
       case e: Error =>
         // TODO (https://github.com/lampepfl/scala3doc/issues/238) error handling
         e.printStackTrace()
         // We encounter bug in Kotlin coroutines (race) when this method throws exception
         // In such case we want to return null to trigger NPE in other piece of code to fail properly coroutine context
-        // Making generated DRIs not-unique will reproduce this behavior 
+        // Making generated DRIs not-unique will reproduce this behavior
         null
 
 class StaticSiteLocationProvider(ctx: DokkaContext, pageNode: RootPageNode)
