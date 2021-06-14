@@ -25,3 +25,18 @@ class SidebarParserTest:
   @Test
   def loadSidebar(): Unit =
     assertEquals(2, Sidebar.load(sidebar).size)
+
+
+  private val sidebar2 = """sidebar:
+    - title: Reference
+      url: site/documentation/reference.html
+    - title: Getting started
+      url: site/documentation/getting-started.html
+    - title: Contributing
+      url: site/documentation/contributing.html
+    - title: Dottydoc
+      url: site/documentation/contributing.html
+ """
+  @Test
+  def loadSidebar2(): Unit =
+    assertEquals(2, Sidebar.load(sidebar2).size)

@@ -111,3 +111,17 @@ class SiteGeneratationTest extends BaseHtmlTest:
         )
     }
   }
+
+  @Test
+  def sidebar() = withGeneratedSite(testDocPath.resolve("sidebar")){
+
+    withHtmlFile("docs/index.html"){ content  =>
+        content.assertAttr("p a","href",
+        "dir/html.html",
+        "dir/name...with..dots..html",
+        "dir/name.with.md.and.html.html",
+        "dir/nested.html",
+        "dir/nested.svg"
+        )
+    }
+  }

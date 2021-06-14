@@ -1,0 +1,8 @@
+sidebar:
+    - title: Reference
+      url: site/documentation/reference.html
+    - title: Getting started
+      url: documentation/documentation/getting-started.html
+    - title: Contributing
+      url: documentation/documentation/contributing.html
+

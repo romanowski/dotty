@@ -28,6 +28,7 @@ object Sidebar:
       Sidebar.Page(title, url)
     case RawInput(title, url, list) if title.nonEmpty && url.isEmpty && !list.isEmpty() =>
       Sidebar.Category(title, list.asScala.map(toSidebar).toList)
+    // case RawInput(title, url, list) =>
 
   def load(content: String): Seq[Sidebar] =
     val mapper = ObjectMapper(YAMLFactory())
